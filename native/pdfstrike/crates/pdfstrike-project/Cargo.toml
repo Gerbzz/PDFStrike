@@ -1,0 +1,14 @@
+[package]
+name = "pdfstrike-project"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pdfcraft-cos = { workspace = true }
+pdfcraft-organize = { workspace = true }
+pdfcraft-annot = { workspace = true }
+pdfcraft-forms = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.11"
+zip = { version = "9.0.1", default-features = false, features = ["deflate-flate2"] }

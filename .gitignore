@@ -1,0 +1,4 @@
+/target/
+/native/pdfstrike/target/
+/build/
+*.pdfstrike.*.tmp

@@ -1,0 +1,4 @@
+[workspace]
+members = ["apps/pdfstrike"]
+exclude = ["vendor/pdfcraft", "native/pdfstrike"]
+resolver = "3"
