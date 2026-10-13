@@ -4,10 +4,6 @@
 
 **Make focused changes while keeping the original PDF.** PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
 
-![PDFStrike native project window after rotating a page in a self-authored test PDF](docs/images/pdfstrike-project-rotation.png)
-
-*Actual Windows project-window capture from the independent rotation review. The Project edits panel recorded the rotation, the source PDF stayed unchanged, and the CLI reopened the archive. The inherited editor toolbar is visible, but only the [bounded project feature set](#current-status-and-limits) below is verified for `.pdfstrike` persistence.*
-
 [Build and test](#build-and-test) · [Source scope](SOURCE_SCOPE.md) · [Project limits](#current-status-and-limits)
 
 ## A project for each revision
