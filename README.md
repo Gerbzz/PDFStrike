@@ -2,35 +2,45 @@
 
 **by PWDS**
 
-**Work through a PDF your way.**
+**Make focused changes while keeping the original PDF.** PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
 
-PDFStrike provides an editable project for focused changes to a PDF. Move, rotate, or remove pages; add notes and highlights; edit supported text and checkbox fields; then export to a new PDF.
+![PDFStrike native project window after rotating a page in a self-authored test PDF](docs/images/pdfstrike-project-rotation.png)
 
-## Highlights
+*Actual Windows project-window capture from the independent rotation review. The Project edits panel recorded the rotation, the source PDF stayed unchanged, and the CLI reopened the archive. The inherited editor toolbar is visible, but only the [bounded project feature set](#current-status-and-limits) below is verified for `.pdfstrike` persistence.*
 
-- Reorder and adjust pages in a project.
-- Review with notes and highlights.
-- Save edits and export a new PDF.
+[Build and test](#build-and-test) · [Source scope](SOURCE_SCOPE.md) · [Project limits](#current-status-and-limits)
 
-## Current status
+## A project for each revision
 
-Windows alpha source. The root and native project cores passed bounded tests, and the native editor built; one rotation workflow was exercised across UI and CLI. Hostile-PDF process isolation, broad annotation and signed-file behavior, accessibility, and release packaging are not yet validated.
+### Arrange pages without changing the source
 
-## Keep edits separate from the source
+Create a project from a PDF, move, rotate, or delete a page, and keep the edits in a `.pdfstrike` archive. The tested Windows workflow rotated a self-authored page through the native UI, used Undo/Redo, and reopened the archive with the separate CLI. The original PDF bytes were unchanged.
 
-Start from an original PDF and keep supported page, note, highlight, and form changes in an editable `.pdfstrike` archive, with undo and redo for revision. Export creates a new PDF and refuses to overwrite the source. The root CLI and native project core share this archive format, while hostile inputs and signed-file behavior still need validation.
+### Add review marks and supported form values
 
-## Source layout, build, and verification
+The independently reviewed project subset covers manual-coordinate notes and highlights plus named text and checkbox AcroForm edits. It does not establish broad annotation compatibility, ink, arbitrary form types, or signed-file behavior.
 
-This source checkout contains two existing Rust workspaces:
+### Export a separate PDF
 
-- The root `apps/pdfstrike` command-line project/core, with its pinned PdfCraft subset in `vendor/pdfcraft`.
-- `native/pdfstrike`, the adapted native editor and `pdfstrike-project` core. It retains its own `Cargo.lock`, PdfCraft source graph, patched vendor crates, and source-required assets.
+Project export creates a **new** PDF and refuses an occupied destination or the source path. Keep the `.pdfstrike` file to revise edits later; exported pages are the shareable output.
 
-Keep the directory layout intact: both project-core test suites refer to the self-authored PDFs and archive under `fixtures/pdfstrike/`. The two cores share the `.pdfstrike` archive format but have separate source revisions. No untested dependency consolidation was made.
+## Build and test
 
-On Windows, after ordinary crates.io dependencies are available, the root CLI can be checked with `cargo test --locked -p pdfstrike`. From `native/pdfstrike`, use `cargo test --locked -p pdfstrike-project` and `cargo build --locked -p pdfstrike-native --bin pdfstrike-native`. The clean standalone source passed 15 root tests and 14 native project tests, including CLI archive compatibility, and built the native editor with required Windows resource compilation. These documentation updates do not change a build input. The native workspace excludes patched donor crates as direct test targets; vendored lopdf's own optional tests still need its unavailable original `assets/example.pdf` fixture.
+This checkout has two Rust workspaces: the root CLI/core in `apps/pdfstrike` with `vendor/pdfcraft`, and the separate native editor/project core in `native/pdfstrike`. Their tested project archives interoperate for the reviewed subset, but the two cores are separate source revisions. Keep the directory layout and self-authored fixtures intact.
 
-The independently reviewed native subset supports page move/rotate/delete, note/highlight, text/checkbox AcroForm edits, project save/reopen/undo/redo, and a new non-overwriting PDF export. The Windows UI was exercised for a project rotation, and the CLI reopened the resulting archive. Hostile-PDF process isolation, broad annotation persistence, real signed-file behavior, power-loss recovery, accessibility, and non-Windows platforms are not validated. No installer is supported by this source checkpoint.
+After ordinary crates.io dependencies are available, on Windows run:
 
-See [SOURCE_SCOPE.md](SOURCE_SCOPE.md) for ownership and donor notices. No first-party license grant is stated for PDFStrike here.
+```powershell
+cargo test --locked -p pdfstrike
+cd native/pdfstrike
+cargo test --locked -p pdfstrike-project
+cargo build --locked -p pdfstrike-native --bin pdfstrike-native
+```
+
+The clean standalone source passed 15 root and 14 native project tests and built the native editor. The independent review also exercised a native rotation and CLI reopen. These are bounded checks, not a release or broad PDF compatibility claim.
+
+## Current status and limits
+
+This is a **Windows alpha source preview**; no installer is supplied. Hostile-PDF process isolation, real digitally signed files, power-loss recovery, broad annotations/forms, accessibility, and other platforms remain unvalidated. Project commands currently cover one-page move/delete/rotate, manual-coordinate note/highlight, named text/checkbox fields, and Undo/Redo. The retained PdfCraft raw-PDF editor exposes more toolbar items, but those items are **not** evidence that their edits persist in a `.pdfstrike` journal.
+
+[SOURCE_SCOPE.md](SOURCE_SCOPE.md) records ownership and retained donor notices. No first-party license grant is stated for PDFStrike here. Explore the other [PWDS Strike repositories](https://github.com/Gerbzz?tab=repositories&q=Strike).
