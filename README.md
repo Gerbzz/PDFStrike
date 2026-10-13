@@ -6,7 +6,7 @@
 
 PDFStrike provides an editable project for focused changes to a PDF. Move, rotate, or remove pages; add notes and highlights; edit supported text and checkbox fields; then export to a new PDF.
 
-### Highlights
+## Highlights
 
 - Reorder and adjust pages in a project.
 - Review with notes and highlights.
@@ -18,7 +18,7 @@ Windows alpha source. The root and native project cores passed bounded tests, an
 
 ## Keep edits separate from the source
 
-The editable `.pdfstrike` archive records supported page, note, highlight, and form changes for later revision. Export creates a new PDF and refuses to overwrite the source. The root CLI and native project core share this archive format, while hostile inputs and signed-file behavior still need validation.
+Start from an original PDF and keep supported page, note, highlight, and form changes in an editable `.pdfstrike` archive, with undo and redo for revision. Export creates a new PDF and refuses to overwrite the source. The root CLI and native project core share this archive format, while hostile inputs and signed-file behavior still need validation.
 
 ## Source layout, build, and verification
 
