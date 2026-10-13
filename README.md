@@ -16,9 +16,9 @@ PDFStrike provides an editable project for focused changes to a PDF. Move, rotat
 
 Windows alpha source. The root and native project cores passed bounded tests, and the native editor built; one rotation workflow was exercised across UI and CLI. Hostile-PDF process isolation, broad annotation and signed-file behavior, accessibility, and release packaging are not yet validated.
 
-## Edit a PDF
+## Keep edits separate from the source
 
-Open a PDF into a project, make supported page or annotation changes, and save the project so you can continue later. Export writes a new PDF rather than overwriting the original. Signed files and hostile inputs require more validation before general use.
+The editable `.pdfstrike` archive records supported page, note, highlight, and form changes for later revision. Export creates a new PDF and refuses to overwrite the source. The root CLI and native project core share this archive format, while hostile inputs and signed-file behavior still need validation.
 
 ## Source layout, build, and verification
 
