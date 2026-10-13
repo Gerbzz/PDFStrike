@@ -1,4 +1,26 @@
-# PDFStrike Windows alpha
+# PDFStrike
+
+**by PWDS**
+
+**Work through a PDF your way.**
+
+PDFStrike provides an editable project for focused changes to a PDF. Move, rotate, or remove pages; add notes and highlights; edit supported text and checkbox fields; then export to a new PDF.
+
+### Highlights
+
+- Reorder and adjust pages in a project.
+- Review with notes and highlights.
+- Save edits and export a new PDF.
+
+## Current status
+
+Windows alpha source. The root and native project cores passed bounded tests, and the native editor built; one rotation workflow was exercised across UI and CLI. Hostile-PDF process isolation, broad annotation and signed-file behavior, accessibility, and release packaging are not yet validated.
+
+## Edit a PDF
+
+Open a PDF into a project, make supported page or annotation changes, and save the project so you can continue later. Export writes a new PDF rather than overwriting the original. Signed files and hostile inputs require more validation before general use.
+
+## Source layout, build, and verification
 
 This source checkout contains two existing Rust workspaces:
 
