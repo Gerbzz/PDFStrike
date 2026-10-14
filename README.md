@@ -15,6 +15,10 @@
 
 PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
 
+![PDFStrike showing the original North Cove review packet in its native editor](assets/screenshots/pdfstrike-project-overview.png)
+
+*A three-page, self-authored PDF opened as an editable PDFStrike project in the retained Windows native editor.*
+
 <p align="center"><a href="#build-and-test">Build and test</a> · <a href="SOURCE_SCOPE.md">Source scope</a> · <a href="#current-status-and-limits">Project limits</a> · <a href="assets/branding">Original artwork</a></p>
 
 ## A project for each revision
@@ -26,6 +30,14 @@ Create a project from a PDF, move, rotate, or delete a page, and keep the edits 
 ### Add review marks and supported form values
 
 The independently reviewed project subset covers manual-coordinate notes and highlights plus named text and checkbox AcroForm edits. It does not establish broad annotation compatibility, ink, arbitrary form types, or signed-file behavior.
+
+![PDFStrike showing a review note on the sample PDF](assets/screenshots/pdfstrike-review-note.png)
+
+*The native project panel saved a review note, shown as a marker on page one.*
+
+![PDFStrike showing a populated reviewer field on page three](assets/screenshots/pdfstrike-form-field.png)
+
+*The native Forms panel set `reviewer.name` to a fictional value in the sample project; the page preview displays that value.*
 
 ### Export a separate PDF
 
@@ -44,7 +56,7 @@ cargo test --locked -p pdfstrike-project
 cargo build --locked -p pdfstrike-native --bin pdfstrike-native
 ```
 
-The clean standalone source passed 15 root and 14 native project tests and built the native editor. The independent review also exercised a native rotation and CLI reopen. These are bounded checks, not a release or broad PDF compatibility claim.
+The clean standalone source passed 15 root and 14 native project tests and built the native editor. The independent review also exercised a native rotation and CLI reopen. A later live capture used a retained portable native binary to open a self-authored three-page project, save a note and a named text field, and display them in the preview. These are bounded checks, not a release or broad PDF compatibility claim. [Screenshot provenance](docs/SCREENSHOT_PROVENANCE.md) records the capture and its limits.
 
 ## Current status and limits
 
