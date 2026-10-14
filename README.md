@@ -1,10 +1,14 @@
-# PDFStrike
+<p align="center">
+  <img src="assets/branding/PDFStrike.png" alt="Original PDFStrike beaver logo" width="160" height="160">
+</p>
 
-**by PWDS**
+<h1 align="center">PDFStrike</h1>
 
-**Make focused changes while keeping the original PDF.** PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
+<p align="center"><strong>by PWDS</strong><br><strong>Make focused changes while keeping the original PDF.</strong></p>
 
-[Build and test](#build-and-test) · [Source scope](SOURCE_SCOPE.md) · [Project limits](#current-status-and-limits)
+PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
+
+<p align="center"><a href="#build-and-test">Build and test</a> · <a href="SOURCE_SCOPE.md">Source scope</a> · <a href="#current-status-and-limits">Project limits</a> · <a href="assets/branding">Original artwork</a></p>
 
 ## A project for each revision
 
