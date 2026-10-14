@@ -1,0 +1,21 @@
+{
+  "app": "PDFStrike",
+  "asset": "assets/branding/PDFStrike.png",
+  "method": "Lossless rectangular extraction of original pixels with ImageMagick. No scaling, recoloring, tracing, generation, transparency fabrication or animal changes. Original cream outside rounded corners retained. Labels excluded.",
+  "coordinate_system": "Origin top-left; crop bounds [left, top, right, bottom), right/bottom exclusive.",
+  "source_sha256": "ffbe34cd3370ce5c475089de7cfdbc155597422dc4cc9269578d3c2000a63fd8",
+  "crop_bounds": [
+    32,
+    0,
+    688,
+    656
+  ],
+  "dimensions": [
+    656,
+    656
+  ],
+  "sha256": "0596fd77638c2e27f50499464a16cf2e879241ea11ab11bdd3af26bdbad7deff",
+  "decoded_rgb_sha256": "11704a40fe52ce70c5499ca6d3ae77c3dd0bf01eb44f9fd24772a086d992ebb0",
+  "pixel_equality_verified": true,
+  "git_blob_sha": "17151a1649ade7c2f837d6b9d85e1ee07992a231"
+}
