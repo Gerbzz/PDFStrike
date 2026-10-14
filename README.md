@@ -15,9 +15,11 @@
 
 PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
 
+**Screenshot scope:** The three images below were captured on October 14 from the reviewed October 11 portable Windows editor checkpoint. [Capture provenance](docs/SCREENSHOT_PROVENANCE.md) records the exact binary and limits.
+
 ![PDFStrike showing the original North Cove review packet in its native editor](assets/screenshots/pdfstrike-project-overview.png)
 
-*A three-page, self-authored PDF opened as an editable PDFStrike project in the retained Windows native editor.*
+*A three-page, self-authored PDF opened in the October 11 portable native editor checkpoint.*
 
 <p align="center"><a href="#build-and-test">Build and test</a> · <a href="SOURCE_SCOPE.md">Source scope</a> · <a href="#current-status-and-limits">Project limits</a> · <a href="assets/branding">Original artwork</a></p>
 
