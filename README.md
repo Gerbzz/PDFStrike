@@ -4,7 +4,14 @@
 
 <h1 align="center">PDFStrike</h1>
 
-<p align="center"><strong>by PWDS</strong><br><strong>Make focused changes while keeping the original PDF.</strong></p>
+<p align="center">
+  <a href="https://prowebdevsolutions.com"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/PWDS-logo-orange.svg">
+    <img src="assets/branding/PWDS-logo.png" alt="PWDS company logo" width="120">
+  </picture></a>
+</p>
+
+<p align="center"><strong>Make focused changes while keeping the original PDF.</strong></p>
 
 PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
 
@@ -44,3 +51,7 @@ The clean standalone source passed 15 root and 14 native project tests and built
 This is a **Windows alpha source preview**; no installer is supplied. Hostile-PDF process isolation, real digitally signed files, power-loss recovery, broad annotations/forms, accessibility, and other platforms remain unvalidated. Project commands currently cover one-page move/delete/rotate, manual-coordinate note/highlight, named text/checkbox fields, and Undo/Redo. The retained PdfCraft raw-PDF editor exposes more toolbar items, but those items are **not** evidence that their edits persist in a `.pdfstrike` journal.
 
 [SOURCE_SCOPE.md](SOURCE_SCOPE.md) records ownership and retained donor notices. No first-party license grant is stated for PDFStrike here. Explore the other [PWDS Strike repositories](https://github.com/Gerbzz?tab=repositories&q=Strike).
+
+## PWDS brand artwork
+
+The company mark in this masthead is the existing [official PWDS logo](https://github.com/Gerbzz/PWDS-Website/blob/main/public/prowebdevsolutions-logo.png), with the [official orange display asset](https://prowebdevsolutions.com/images/prowebdevsolutions-logo-orange.svg) for dark backgrounds. Any app logo above it remains the original Strike suite artwork.
