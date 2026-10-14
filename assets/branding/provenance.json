@@ -1,21 +1,70 @@
 {
   "app": "PDFStrike",
   "asset": "assets/branding/PDFStrike.png",
-  "method": "Lossless rectangular extraction of original pixels with ImageMagick. No scaling, recoloring, tracing, generation, transparency fabrication or animal changes. Original cream outside rounded corners retained. Labels excluded.",
-  "coordinate_system": "Origin top-left; crop bounds [left, top, right, bottom), right/bottom exclusive.",
-  "source_sha256": "ffbe34cd3370ce5c475089de7cfdbc155597422dc4cc9269578d3c2000a63fd8",
-  "crop_bounds": [
-    32,
-    0,
-    688,
-    656
-  ],
+  "method": "Measured rounded alpha mask applied to the original 656x656 logo tile, then translated by whole pixels to center its visible bounds. Original visible RGB and masked visible RGBA were verified unchanged.",
+  "source_tile": {
+    "repository": "Gerbzz/PDFStrike",
+    "commit": "9e5e0d75bd4218da858826870d776530d7a6d2be",
+    "path": "assets/branding/PDFStrike.png",
+    "sha256": "0596fd77638c2e27f50499464a16cf2e879241ea11ab11bdd3af26bdbad7deff",
+    "git_blob_sha": "17151a1649ade7c2f837d6b9d85e1ee07992a231"
+  },
+  "mask_and_centering": {
+    "inset_pixels": 1.5,
+    "masked_alpha_bbox": [
+      11,
+      23,
+      648,
+      641
+    ],
+    "centered_alpha_bbox": [
+      9,
+      19,
+      646,
+      637
+    ],
+    "integer_translation": [
+      -2,
+      -4
+    ],
+    "padding_ltrb": [
+      9,
+      19,
+      10,
+      19
+    ],
+    "original_visible_rgb_exact": true,
+    "masked_visible_rgba_exact": true,
+    "transparent_corners": true
+  },
   "dimensions": [
     656,
     656
   ],
-  "sha256": "0596fd77638c2e27f50499464a16cf2e879241ea11ab11bdd3af26bdbad7deff",
-  "decoded_rgb_sha256": "11704a40fe52ce70c5499ca6d3ae77c3dd0bf01eb44f9fd24772a086d992ebb0",
-  "pixel_equality_verified": true,
-  "git_blob_sha": "17151a1649ade7c2f837d6b9d85e1ee07992a231"
+  "mode": "RGBA",
+  "sha256": "dcc34a06f49a735db65e517ba1ac6b6ee9525eb3551389ca3a524a66bfe4315f",
+  "decoded_rgba_sha256": "9e9c13894ae364e69e41be81eb558b1bdeb2fd6022a37fa73a8e494dafb13ed2",
+  "git_blob_sha": "fbca9304e1724ccfa2e12759556901855631e0c1",
+  "tool": "ImageMagick 7.1.2-34 Q16 x64",
+  "original_tile_provenance": {
+    "app": "PDFStrike",
+    "asset": "assets/branding/PDFStrike.png",
+    "method": "Lossless rectangular extraction of original pixels with ImageMagick. No scaling, recoloring, tracing, generation, transparency fabrication or animal changes. Original cream outside rounded corners retained. Labels excluded.",
+    "coordinate_system": "Origin top-left; crop bounds [left, top, right, bottom), right/bottom exclusive.",
+    "source_sha256": "ffbe34cd3370ce5c475089de7cfdbc155597422dc4cc9269578d3c2000a63fd8",
+    "crop_bounds": [
+      32,
+      0,
+      688,
+      656
+    ],
+    "dimensions": [
+      656,
+      656
+    ],
+    "sha256": "0596fd77638c2e27f50499464a16cf2e879241ea11ab11bdd3af26bdbad7deff",
+    "decoded_rgb_sha256": "11704a40fe52ce70c5499ca6d3ae77c3dd0bf01eb44f9fd24772a086d992ebb0",
+    "pixel_equality_verified": true,
+    "git_blob_sha": "17151a1649ade7c2f837d6b9d85e1ee07992a231"
+  }
 }
