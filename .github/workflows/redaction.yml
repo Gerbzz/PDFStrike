@@ -1,0 +1,72 @@
+name: Redaction and native checks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/redaction.yml'
+      - 'native/pdfstrike/**'
+      - 'apps/pdfstrike/**'
+      - 'vendor/pdfcraft/**'
+      - 'fixtures/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: redaction-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: '2'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_DEV_INCREMENTAL: 'false'
+
+jobs:
+  checks:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+        working-directory: native/pdfstrike
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Record exact source revision
+        run: git rev-parse HEAD
+      - name: Redaction formatting
+        run: rustfmt --check --edition 2024 --config-path rustfmt.toml crates/redact/src/image.rs crates/redact/src/interp.rs crates/redact/src/lib.rs crates/redact/src/sanitize.rs crates/redact/src/tests.rs
+      - name: Redaction regressions and controls
+        run: cargo test --locked -p pdfcraft-redact --lib
+      - name: Redaction Clippy
+        run: cargo clippy --locked -p pdfcraft-redact --lib --no-deps -- -D warnings
+      - name: Native project controls
+        if: runner.os == 'Windows'
+        run: cargo test --locked -p pdfstrike-project
+      - name: Root CLI controls
+        if: runner.os == 'Windows'
+        run: cargo test --locked --manifest-path ../../Cargo.toml -p pdfstrike
+      - name: Engine redaction transaction and undo
+        if: runner.os == 'Windows'
+        run: cargo test --locked -p pdfcraft-engine --lib tests::redaction_marks_apply_for_good_and_undo -- --exact
+      - name: Native editor build
+        if: runner.os == 'Windows'
+        run: cargo build --locked -p pdfstrike-native --bin pdfstrike-native

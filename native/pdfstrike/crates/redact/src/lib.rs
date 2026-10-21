@@ -277,6 +277,7 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
     by_page.dedup();
     report.pages = by_page.len();
     let mut doomed_fields: Vec<String> = Vec::new();
+    let mut doomed_xobjects = Vec::new();
     let widget_owner: Vec<(ObjRef, String)> =
         pdfcraft_forms::fields(doc).into_iter().flat_map(|f| f.widgets.iter().map(|w| (w.obj, f.name.clone())).collect::<Vec<_>>()).collect();
 
@@ -292,6 +293,10 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
             let mut scope = Scope::new(&rects, Mode::Apply, &mut report);
             process(doc, &mut scope, &data, &resources, pdfcraft_content::Matrix::IDENTITY)
         };
+        if let Some(error) = out.error {
+            return Err(error);
+        }
+        doomed_xobjects.extend_from_slice(&out.doomed);
         let mut new_list = list.clone();
         let mut changed = false;
         for (i, new) in out.streams.into_iter().enumerate() {
@@ -309,15 +314,17 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
             new_list[i] = Object::Ref(doc.add(Object::Stream(Stream::flate(dict, &bytes))));
             changed = true;
         }
-        if changed || !out.xobjects.is_empty() {
+        if changed || !out.xobjects.is_empty() || !out.doomed.is_empty() {
             let mut res = resources;
-            if !out.xobjects.is_empty() {
-                let mut xo = res.get(b"XObject").and_then(|x| doc.resolve(x).as_dict().cloned()).unwrap_or_default();
-                for (n, r) in &out.xobjects {
-                    xo.set(n.clone(), Object::Ref(*r));
-                }
-                res.set(b"XObject".to_vec(), Object::Dict(xo));
+            let mut xo = res.get(b"XObject").and_then(|x| doc.resolve(x).as_dict().cloned()).unwrap_or_default();
+            for (name, reference) in &out.xobjects {
+                xo.set(name.clone(), Object::Ref(*reference));
             }
+            res.set(b"XObject".to_vec(), Object::Dict(xo));
+            let mut cleaned_page = page.dict.clone();
+            cleaned_page.set(b"Contents".to_vec(), Object::Array(new_list.clone()));
+            let (_, page_content) = page_streams(doc, &cleaned_page, pi)?;
+            interp::prune_xobjects(doc, &mut res, &out.doomed, &page_content)?;
             doc.update_dict(page.obj, |d| {
                 d.set(b"Contents".to_vec(), Object::Array(new_list));
                 d.set(b"Resources".to_vec(), Object::Dict(res));
@@ -379,6 +386,8 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
             }
         })?;
     }
+
+    interp::unlink_doomed(doc, &doomed_xobjects)?;
 
     // 3. Form fields with a widget under a mark (all their widgets go).
     for name in &doomed_fields {
