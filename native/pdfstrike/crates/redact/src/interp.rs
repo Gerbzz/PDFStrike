@@ -38,6 +38,7 @@ pub(crate) enum Mode {
 struct Gs {
     ctm: Matrix,
     font: Rc<Metrics>,
+    font_known: bool,
     size: f64,
     char_spacing: f64,
     word_spacing: f64,
@@ -353,7 +354,23 @@ fn res_dict(doc: &Document, res: &Dict, key: &[u8]) -> Dict {
 }
 
 fn type_is(doc: &Document, dict: &Dict, name: &[u8]) -> bool {
-    dict.get(b"Type").is_some_and(|value| doc.resolve(value).as_name() == Some(name))
+    name_is(doc, dict, b"Type", name)
+}
+
+fn name_is(doc: &Document, dict: &Dict, key: &[u8], name: &[u8]) -> bool {
+    dict.get(key).is_some_and(|value| doc.resolve(value).as_name() == Some(name))
+}
+
+fn known_advance_font(doc: &Document, dict: &Dict) -> bool {
+    if name_is(doc, dict, b"Subtype", b"Type3") {
+        return false;
+    }
+    match dict.get(b"Encoding").map(|value| doc.resolve(value)).as_deref() {
+        Some(Object::Name(name)) => !name.ends_with(b"-V"),
+        // This snapshot cannot establish an embedded CMap's writing direction here.
+        Some(Object::Stream(_)) => false,
+        _ => true,
+    }
 }
 
 fn fresh_name(scope: &mut Scope<'_>, xobjects: &Dict) -> Vec<u8> {
@@ -378,7 +395,7 @@ fn content_draws(doc: &Document, content: &[Vec<u8>], res: &Dict, name: &[u8], d
     // These resource users can inherit XObjects without a Do in this stream. The
     // older Strike interpreter cannot establish their usage: refuse cleanup.
     let fonts = res_dict(doc, res, b"Font");
-    let type3 = fonts.iter().any(|(_, font)| doc.resolve(font).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Type3")));
+    let type3 = fonts.iter().any(|(_, font)| doc.resolve(font).as_dict().is_some_and(|d| name_is(doc, d, b"Subtype", b"Type3")));
     let text = parsed.ops.iter().any(|op| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\""));
     let pattern = !res_dict(doc, res, b"Pattern").is_empty() && parsed.ops.iter().any(|op| matches!(op.op.as_slice(), b"scn" | b"SCN"));
     let soft_mask = res_dict(doc, res, b"ExtGState")
@@ -397,7 +414,9 @@ fn content_draws(doc: &Document, content: &[Vec<u8>], res: &Dict, name: &[u8], d
         let Some(r) = xo.get(n).and_then(Object::as_ref) else { continue };
         let obj = doc.get(r);
         let Object::Stream(s) = &*obj else { continue };
-        if s.dict.name(b"Subtype") != Some(b"Form") || s.dict.get(b"Resources").is_some_and(|r| doc.resolve(r).as_dict().is_some()) || !seen.insert(r)
+        if !name_is(doc, &s.dict, b"Subtype", b"Form")
+            || s.dict.get(b"Resources").is_some_and(|r| doc.resolve(r).as_dict().is_some())
+            || !seen.insert(r)
         {
             continue;
         }
@@ -413,11 +432,98 @@ fn content_draws(doc: &Document, content: &[Vec<u8>], res: &Dict, name: &[u8], d
     Some(false)
 }
 
+/// Structural aliases outside the supported XObject resource paths must not turn
+/// an incomplete cleanup into success. Inspect dictionaries, arrays and stream
+/// dictionaries without interpreting their payloads or deleting unknown resources.
+fn references_doomed(
+    doc: &Document,
+    value: &Object,
+    doomed: &HashSet<ObjRef>,
+    path: &mut HashSet<ObjRef>,
+    depth: usize,
+    budget: &mut usize,
+) -> Result<bool, RedactError> {
+    if depth > 64 || *budget == 0 {
+        return Err(RedactError::Residue(1));
+    }
+    *budget -= 1;
+    match value {
+        Object::Ref(reference) => {
+            if doomed.contains(reference) {
+                return Ok(true);
+            }
+            if !path.insert(*reference) {
+                return Err(RedactError::Residue(1));
+            }
+            let result = references_doomed(doc, &doc.get(*reference), doomed, path, depth + 1, budget);
+            path.remove(reference);
+            result
+        }
+        Object::Array(items) => {
+            for item in items {
+                if references_doomed(doc, item, doomed, path, depth + 1, budget)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        Object::Dict(dict) => dict_references_doomed(doc, dict, doomed, path, depth, budget),
+        Object::Stream(stream) => dict_references_doomed(doc, &stream.dict, doomed, path, depth, budget),
+        _ => Ok(false),
+    }
+}
+
+fn dict_references_doomed(
+    doc: &Document,
+    dict: &Dict,
+    doomed: &HashSet<ObjRef>,
+    path: &mut HashSet<ObjRef>,
+    depth: usize,
+    budget: &mut usize,
+) -> Result<bool, RedactError> {
+    for (_, value) in dict.iter() {
+        if references_doomed(doc, value, doomed, path, depth + 1, budget)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn reject_unsupported_aliases(doc: &Document, res: &Dict, doomed: &HashSet<ObjRef>) -> Result<(), RedactError> {
+    let mut budget = 100_000;
+    let mut path = HashSet::new();
+    for (key, value) in res.iter() {
+        if key != b"XObject" && references_doomed(doc, value, doomed, &mut path, 0, &mut budget)? {
+            return Err(RedactError::Residue(1));
+        }
+    }
+    for (_, value) in res_dict(doc, res, b"XObject").iter() {
+        // A supported original still drawn outside a mark may remain intentionally.
+        if value.as_ref().is_some_and(|r| doomed.contains(&r)) {
+            continue;
+        }
+        let object = doc.resolve(value);
+        let Some(dict) = object.as_dict() else { continue };
+        let form = name_is(doc, dict, b"Subtype", b"Form");
+        for (key, value) in dict.iter() {
+            // Form-owned resources are handled recursively by unlink_form_aliases.
+            if form && key == b"Resources" {
+                continue;
+            }
+            if references_doomed(doc, value, doomed, &mut path, 0, &mut budget)? {
+                return Err(RedactError::Residue(1));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn prune_xobjects(doc: &Document, res: &mut Dict, doomed: &[ObjRef], contents: &[Vec<u8>]) -> Result<(), RedactError> {
     if doomed.is_empty() {
         return Ok(());
     }
     let doomed: HashSet<ObjRef> = doomed.iter().copied().collect();
+    reject_unsupported_aliases(doc, res, &doomed)?;
     let mut xo = res_dict(doc, res, b"XObject");
     let names: Vec<Vec<u8>> = xo.iter().filter(|(_, v)| v.as_ref().is_some_and(|r| doomed.contains(&r))).map(|(n, _)| n.to_vec()).collect();
     for name in names {
@@ -452,7 +558,7 @@ fn affected_forms(doc: &Document, roots: &[ObjRef], doomed: &[ObjRef]) -> Result
             }
             let object = doc.get(reference);
             let Object::Stream(form) = &*object else { continue };
-            if form.dict.name(b"Subtype") != Some(b"Form") {
+            if !name_is(doc, &form.dict, b"Subtype", b"Form") {
                 continue;
             }
             let Some(res) = form.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()) else { continue };
@@ -495,10 +601,11 @@ fn unlink_form_aliases(doc: &mut Document, roots: &[ObjRef], affected: &HashSet<
             }
             let object = doc.get(reference);
             let Object::Stream(form) = &*object else { continue };
-            if form.dict.name(b"Subtype") != Some(b"Form") {
+            if !name_is(doc, &form.dict, b"Subtype", b"Form") {
                 continue;
             }
             let Some(mut res) = form.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()) else { continue };
+            reject_unsupported_aliases(doc, &res, affected)?;
             let candidates: Vec<ObjRef> =
                 res_dict(doc, &res, b"XObject").iter().filter_map(|(_, value)| value.as_ref()).filter(|r| affected.contains(r)).collect();
             if !candidates.is_empty() {
@@ -546,6 +653,7 @@ pub(crate) fn unlink_doomed(doc: &mut Document, doomed: &[ObjRef]) -> Result<(),
         let Some(mut res) = doc.get(node).as_dict().and_then(|d| d.get(b"Resources")).and_then(|r| doc.resolve(r).as_dict().cloned()) else {
             continue;
         };
+        reject_unsupported_aliases(doc, &res, &affected)?;
         let xo = res_dict(doc, &res, b"XObject");
         let names: Vec<Vec<u8>> = xo.iter().filter(|(_, v)| v.as_ref().is_some_and(|r| affected.contains(&r))).map(|(n, _)| n.to_vec()).collect();
         if names.is_empty() {
@@ -614,8 +722,18 @@ struct Glyph {
 pub(crate) fn process(doc: &mut Document, scope: &mut Scope<'_>, streams: &[Vec<u8>], resources: &Dict, ctm: Matrix) -> Output {
     let mut out = Output::default();
     let fallback = Rc::new(Metrics::fallback());
-    let mut gs =
-        Gs { ctm, font: fallback.clone(), size: 0.0, char_spacing: 0.0, word_spacing: 0.0, render_mode: 0, scale: 1.0, leading: 0.0, rise: 0.0 };
+    let mut gs = Gs {
+        ctm,
+        font: fallback.clone(),
+        font_known: false,
+        size: 0.0,
+        char_spacing: 0.0,
+        word_spacing: 0.0,
+        render_mode: 0,
+        scale: 1.0,
+        leading: 0.0,
+        rise: 0.0,
+    };
     let mut stack: Vec<Gs> = Vec::new();
     let (mut tm, mut tlm) = (Matrix::IDENTITY, Matrix::IDENTITY);
     let fonts_res = res_dict(doc, resources, b"Font");
@@ -759,6 +877,10 @@ pub(crate) fn process(doc: &mut Document, scope: &mut Scope<'_>, streams: &[Vec<
                 b"Tf" => {
                     gs.size = op.num(1).unwrap_or(gs.size);
                     if let Some(name) = op.name(0) {
+                        gs.font_known = fonts_res
+                            .get(name)
+                            .and_then(|font| doc.resolve(font).as_dict().cloned())
+                            .is_some_and(|dict| known_advance_font(doc, &dict));
                         gs.font = match scope.fonts.get(name) {
                             Some(f) => f.clone(),
                             None => {
@@ -771,6 +893,23 @@ pub(crate) fn process(doc: &mut Document, scope: &mut Scope<'_>, streams: &[Vec<
                                 m
                             }
                         };
+                    }
+                }
+                b"gs" => {
+                    let states = res_dict(doc, resources, b"ExtGState");
+                    if let Some(state) = op.name(0).and_then(|name| states.get(name)).map(|value| doc.resolve(value))
+                        && let Some(font) = state.as_dict().and_then(|dict| dict.get(b"Font"))
+                    {
+                        let font = doc.resolve(font);
+                        let pair = font.as_array().filter(|pair| pair.len() == 2);
+                        let dict = pair.and_then(|pair| doc.resolve(&pair[0]).as_dict().cloned());
+                        let size = pair.and_then(|pair| doc.resolve(&pair[1]).as_f64()).filter(|size| size.is_finite());
+                        gs.font_known = false;
+                        if let (Some(dict), Some(size)) = (dict, size) {
+                            gs.font = Rc::new(Metrics::from_dict(doc, &dict));
+                            gs.font_known = known_advance_font(doc, &dict);
+                            gs.size = size;
+                        }
                     }
                 }
                 b"Tc" => gs.char_spacing = op.num(0).unwrap_or(0.0),
@@ -815,7 +954,9 @@ pub(crate) fn process(doc: &mut Document, scope: &mut Scope<'_>, streams: &[Vec<
                     // cannot replace its glyph outlines without retaining the secret string.
                     if hidden
                         && scope.mode == Mode::Apply
-                        && ((4..=7).contains(&gs.render_mode) || (gs.size == 0.0 && (gs.char_spacing != 0.0 || gs.word_spacing != 0.0)))
+                        && (!gs.font_known
+                            || (4..=7).contains(&gs.render_mode)
+                            || (gs.size == 0.0 && (gs.char_spacing != 0.0 || gs.word_spacing != 0.0)))
                     {
                         out.error = Some(RedactError::Residue(1));
                         return out;
@@ -1043,7 +1184,8 @@ fn xobject(
     let r = xobjects.get(&name)?.as_ref()?;
     let obj = doc.get(r);
     let Object::Stream(s) = &*obj else { return None };
-    match s.dict.name(b"Subtype") {
+    let subtype = s.dict.get(b"Subtype").map(|value| doc.resolve(value));
+    match subtype.as_deref().and_then(Object::as_name) {
         _ if s.dict.get(b"OC").is_some_and(|oc| scope.xobject_layer_hidden(doc, r, oc)) => {
             // Verify mode must count hidden XObjects too: scan uses that count to decide
             // whether the HiddenLayers pass is necessary.

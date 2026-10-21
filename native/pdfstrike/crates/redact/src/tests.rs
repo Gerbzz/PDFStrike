@@ -536,18 +536,81 @@ fn an_image_drawn_again_outside_the_mark_keeps_its_original() {
 
 #[test]
 fn an_unused_form_alias_cannot_retain_the_original_image() {
+    for subtype in ["/Form", "9 0 R"] {
+        let mut doc = one_page(
+            b"q 200 0 0 100 0 0 cm /Im Do Q",
+            "/XObject << /Im 7 0 R /Unused 8 0 R >>",
+            vec![
+                stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
+                stream(&format!("/Type /XObject /Subtype {subtype} /BBox [0 0 1 1] /Resources << /XObject << /Alias 7 0 R >> >>"), b""),
+                b"/Form".to_vec(),
+            ],
+        );
+        mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+        assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1);
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_no_stream_payload(&saved, &[123, 234]);
+    }
+}
+
+#[test]
+fn an_indirect_subtype_form_keeps_an_inherited_image_drawn_outside_the_mark() {
     let mut doc = one_page(
-        b"q 200 0 0 100 0 0 cm /Im Do Q",
-        "/XObject << /Im 7 0 R /Unused 8 0 R >>",
+        b"q 200 0 0 100 0 0 cm /Im Do Q q 50 0 0 50 220 220 cm /Fm Do Q",
+        "/XObject << /Im 7 0 R /Fm 8 0 R >>",
         vec![
             stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
-            stream("/Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources << /XObject << /Alias 7 0 R >> >>", b""),
+            stream("/Type /XObject /Subtype 9 0 R /BBox [0 0 1 1]", b"/Im Do"),
+            b"/Form".to_vec(),
         ],
     );
     mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
     assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1);
     let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
-    assert_no_stream_payload(&saved, &[123, 234]);
+    assert_eq!(named_image(&saved, 0, b"Im"), Some(vec![123, 234]));
+    assert_eq!(named_image(&saved, 0, b"PCRedacted1"), Some(vec![0, 234]));
+}
+
+#[test]
+fn unused_non_xobject_resource_aliases_refuse_incomplete_cleanup() {
+    for (extra, owner) in [
+        (
+            "/Pattern << /P 8 0 R >>",
+            stream("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 1 1] /XStep 1 /YStep 1 /Resources 9 0 R", b""),
+        ),
+        ("/Font << /T3 8 0 R >>", b"<< /Type /Font /Subtype /Type3 /Resources 9 0 R >>".to_vec()),
+        ("/ExtGState << /G 8 0 R >>", b"<< /SMask << /S /Alpha /G 10 0 R >> >>".to_vec()),
+    ] {
+        let mut doc = one_page(
+            b"q 200 0 0 100 0 0 cm /Im Do Q",
+            &format!("{extra} /XObject << /Im 7 0 R >>"),
+            vec![
+                stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
+                owner,
+                b"<< /XObject << /Alias 7 0 R >> >>".to_vec(),
+                stream("/Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources 9 0 R", b""),
+            ],
+        );
+        mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+        assert_eq!(apply(&mut doc, None), Err(RedactError::Residue(1)), "{extra}");
+    }
+}
+
+#[test]
+fn surviving_xobject_metadata_cannot_retain_a_replaced_original() {
+    for subtype in ["/Image", "/Form"] {
+        let mut doc = one_page(
+            b"q 200 0 0 100 0 0 cm /Im Do Q",
+            "/XObject << /Im 7 0 R /Unused 8 0 R >>",
+            vec![
+                stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
+                stream(&format!("/Type /XObject /Subtype {subtype} /BBox [0 0 1 1] /PieceInfo << /Private [9 0 R] >>"), b""),
+                b"<< /Alias 7 0 R >>".to_vec(),
+            ],
+        );
+        mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+        assert_eq!(apply(&mut doc, None), Err(RedactError::Residue(1)), "{subtype}");
+    }
 }
 
 #[test]
@@ -652,6 +715,31 @@ fn hidden_ocmd_removal_preserves_later_graphics_state_and_text_advance() {
         let visible = lines.iter().find(|line| line.text.contains("VISIBLE")).unwrap();
         assert!((visible.rect[0] - expected_x).abs() < 0.001, "{lines:?}");
         assert_eq!(visible.color, visible_before.color);
+        assert_no_stream_payload(&saved, b"SECRET");
+    }
+}
+
+#[test]
+fn hidden_text_advances_use_extgstate_fonts_and_restore_them_with_q() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    for (state, expected_x) in [("/G gs", 70.0), ("q /G gs Q", 40.0)] {
+        let data = format!("BT /F1 10 Tf 10 100 Td {state} /OC /M BDC (SECRET) Tj EMC (VISIBLE) Tj ET");
+        let mut doc = one_page(
+            data.as_bytes(),
+            "/Font << /F1 5 0 R /F2 7 0 R >> /ExtGState << /G << /Font [7 0 R 10] >> >> /Properties << /M 11 0 R >>",
+            vec![
+                FONT.replace("95 0 R", "8 0 R").into_bytes(),
+                format!("[{}]", vec!["1000"; 95].join(" ")).into_bytes(),
+                b"<< /Type /OCG /Name (On) >>".to_vec(),
+                b"null".to_vec(),
+                b"<< /Type /OCMD /OCGs [9 0 R] /P /AllOff >>".to_vec(),
+            ],
+        );
+        remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        let lines = pdfcraft_edit::text_lines(&saved, 0).unwrap();
+        let visible = lines.iter().find(|line| line.text.contains("VISIBLE")).unwrap();
+        assert!((visible.rect[0] - expected_x).abs() < 0.001, "{state}: {lines:?}");
         assert_no_stream_payload(&saved, b"SECRET");
     }
 }

@@ -21,6 +21,8 @@ Both updates depend on removing stale original XObject resource aliases before a
 
 Review adaptations also resolve indirect OCMD type/operator values, remove unused Form-owned alias paths, and preserve persistent graphics state and text advances when suppressing hidden painting. The indirect-value handling follows [PDF syntax guidance, section 7.3.10](https://pdf-issues.pdfa.org/32000-2-2020/clause07.html); optional-content state handling follows [Adobe PDF Reference 1.6, section 4.10.2](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.6.pdf). Hidden clipping text and zero-size text with character/word spacing are refused when a safe state-preserving rewrite cannot be established.
 
+Publication review additionally covers indirect XObject subtypes and bounded structural checks for original-object aliases in other resource containers and surviving XObject metadata. Unsupported alias paths cause failure rather than a successful incomplete cleanup. ExtGState font selection is included in graphics-state tracking, including save/restore; hidden text with unestablished font advances (including vertical or embedded-CMap writing direction) is refused.
+
 ## Optional patched-donor fixtures
 
 The four PNGs under `native/pdfstrike/vendor/winit/examples/data/` were restored byte-for-byte from the locally cached **winit 0.30.13** crates.io source package. They are example-only, not PDFStrike runtime art. The cached package and this patched vendor copy carry the same Apache-2.0 `LICENSE`; their source SHA-256 values are recorded in the local candidate verification report. No example was compiled during source preparation.
