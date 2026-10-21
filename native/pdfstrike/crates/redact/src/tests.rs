@@ -844,7 +844,15 @@ fn hidden_composite_text_refuses_unestablished_font_advances() {
                 let lines = pdfcraft_edit::text_lines(&saved, 0).unwrap();
                 let visible = lines.iter().find(|line| line.text.contains("VISIBLE")).unwrap();
                 assert!((visible.rect[0] - 30.0).abs() < 0.001, "{state}: {lines:?}");
-                assert_no_stream_payload(&saved, &[0, 1]);
+                // The two-byte CID can occur in binary xref/other streams. Check
+                // parsed page text operands, including literal and hex strings.
+                let parsed = pdfcraft_content::parse(content(&saved, 0).as_bytes());
+                assert_eq!(parsed.skipped, 0);
+                let text = parsed.ops.iter().filter(|op| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\""));
+                for operand in text.flat_map(|op| &op.operands) {
+                    let items = operand.as_array().map_or_else(|| std::slice::from_ref(operand), Vec::as_slice);
+                    assert!(items.iter().filter_map(Object::as_string).all(|s| s.bytes != [0, 1]), "hidden CID survived: {parsed:?}");
+                }
             } else {
                 assert_eq!(result, Err(RedactError::Residue(1)), "{subtype} {encoding} {state}");
             }
