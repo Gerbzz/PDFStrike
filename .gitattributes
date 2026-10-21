@@ -1,0 +1,2 @@
+# Preserve the captured PNG and manifest bytes exactly, including JSON line endings.
+/assets/screenshots/current/* -text

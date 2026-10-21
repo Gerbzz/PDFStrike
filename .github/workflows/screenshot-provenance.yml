@@ -1,0 +1,39 @@
+name: Screenshot provenance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.gitattributes'
+      - 'README.md'
+      - 'docs/SCREENSHOT_PROVENANCE.md'
+      - 'assets/screenshots/current/**'
+      - 'scripts/verify-current-captures.ps1'
+      - '.github/workflows/screenshot-provenance.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.gitattributes'
+      - 'README.md'
+      - 'docs/SCREENSHOT_PROVENANCE.md'
+      - 'assets/screenshots/current/**'
+      - 'scripts/verify-current-captures.ps1'
+      - '.github/workflows/screenshot-provenance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify current screenshot bytes and source
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify capture provenance
+        shell: pwsh
+        run: ./scripts/verify-current-captures.ps1

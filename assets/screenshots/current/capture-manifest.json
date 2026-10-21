@@ -1,0 +1,307 @@
+{
+  "schema": 1,
+  "status": "success",
+  "source_commit": "20deb626b079ca7d4c222c65f8854ba1ac74d7a6",
+  "source_tree": "35bf80c3e2012e30cd7c6fc2cb2600eead029249",
+  "native_source_tree": "fe16d291dbb50458499b06ef9b06b9289cf8a3fd",
+  "fixtures_tree": "93a3592425843fef7abedc753bf0593bf2d7b083",
+  "cli_tree": "560775786605102511d334435f3e86b8fc36e51c",
+  "helper_sha256": "3b314131d9de113b022746c39ea18abf436cbfa30c2021e850c70cfd039e489e",
+  "executable_sha256": "e2c4c573bc42e9fe70e95a264ddc1042211096ab1cbc3dbb407b4a36feab6c09",
+  "github": {
+    "repository": "Gerbzz/PDFStrike",
+    "run_id": "39669070169",
+    "run_attempt": "1",
+    "workflow": "Redaction and native checks"
+  },
+  "os": "Microsoft Windows 10.0.26100",
+  "desktop_work_area": [
+    0,
+    0,
+    1024,
+    720
+  ],
+  "capture_methods": [
+    "Native window: System.Drawing.CopyFromScreen of the visible DWM frame bounds, including OS titlebar.",
+    "Client: ui.screenshot from the running PDFStrike wrapper, without OS decorations."
+  ],
+  "fixtures": [
+    {
+      "path": "fixtures/pdfstrike/native-compat.pdfstrike",
+      "sha256": "9fd1f8d7dc2245f2ba29d5b88d16854dd60b87d0629c5427bf5810e56d2a18be"
+    },
+    {
+      "path": "fixtures/pdfstrike/packet-real.pdf",
+      "sha256": "10121192eaacea0a687519d4e49dc3629d677c70ef1b5de6ed2130a27913f887"
+    },
+    {
+      "path": "fixtures/pdfstrike/form-real.pdf",
+      "sha256": "b722d6e3facb821511e95146aabf6f8b704337a51aa0cd9c6affd42da06e7a20"
+    }
+  ],
+  "logo_assets": [
+    {
+      "path": "native/pdfstrike/assets/app-icon/pdfstrike-geometric-256.png",
+      "sha256": "dffe0dd26998b81f564e3dca63540066e28bce5225cf6a86b4a1286a99f47076"
+    },
+    {
+      "path": "native/pdfstrike/assets/app-icon/pdfstrike-geometric.ico",
+      "sha256": "3393c74a4d364d1fe64ef06ca688ad94e1368d3fa57403a933bae4b3d512a313"
+    }
+  ],
+  "launches": [
+    {
+      "fixture": "native-compat.pdfstrike",
+      "panel": "none",
+      "process_id": 7092,
+      "requested_window_size": [
+        1024,
+        720
+      ]
+    },
+    {
+      "fixture": "form-real.pdf",
+      "panel": "fields",
+      "process_id": 10024,
+      "requested_window_size": [
+        1024,
+        720
+      ]
+    }
+  ],
+  "shots": [
+    {
+      "name": "pdfstrike-project-overview-current",
+      "description": "Current native PDFStrike project wrapper with the checked-in four-page synthetic packet fixture.",
+      "capture_utc": "2026-10-21T20:56:26.5502991Z",
+      "active": {
+        "auto_scrolling": false,
+        "comment_composer_open": false,
+        "doc": 1,
+        "find_open": false,
+        "fit": "None",
+        "grid_zoom": 1.0,
+        "layout": "Single",
+        "organize": false,
+        "page": 1,
+        "page_errors": [],
+        "pages_on_screen": [
+          {
+            "page": 1,
+            "rect": [
+              300.0,
+              76.0,
+              952.800048828125,
+              920.800048828125
+            ]
+          }
+        ],
+        "raster_memory": {
+          "page_bytes": 3656600,
+          "page_count": 2,
+          "pending_requests": 0,
+          "thumbnail_bytes": 0,
+          "thumbnail_count": 0,
+          "thumbnail_demand": 0,
+          "tile_bytes": 0,
+          "tile_count": 0
+        },
+        "selected_comment": null,
+        "selected_pages": [],
+        "viewport": [
+          292.0,
+          124.0,
+          961.0,
+          681.0
+        ],
+        "zoom_percent": 80.0
+      },
+      "mode": "Read",
+      "right_panel": null,
+      "client": {
+        "file": "pdfstrike-project-overview-current-client.png",
+        "width": 1008,
+        "height": 681,
+        "pixels_per_point": 1.0,
+        "sha256": "420772e6d9bcde86f5c9b8d102e6d2323c93c3afe17ab8809a63154d2482eaf1"
+      },
+      "client_file": "pdfstrike-project-overview-current-client.png",
+      "client_sha256": "420772e6d9bcde86f5c9b8d102e6d2323c93c3afe17ab8809a63154d2482eaf1",
+      "window": {
+        "file": "pdfstrike-project-overview-current-window.png",
+        "width": 1010,
+        "height": 713,
+        "bounds": [
+          7,
+          0,
+          1017,
+          713
+        ],
+        "bounds_method": "DWM extended frame bounds",
+        "title": "native-compat.pdfstrike - PDFStrike",
+        "dpi": 96,
+        "sha256": "7f8b64b4a7d9e343e6670a1137e06a915067aca0ec41dae18e2825be3fa9573c"
+      },
+      "window_file": "pdfstrike-project-overview-current-window.png",
+      "window_sha256": "7f8b64b4a7d9e343e6670a1137e06a915067aca0ec41dae18e2825be3fa9573c"
+    },
+    {
+      "name": "pdfstrike-review-note-current",
+      "description": "A fictional note was entered through the native project Comments panel and verified in the saved project journal.",
+      "capture_utc": "2026-10-21T20:56:30.0085621Z",
+      "active": {
+        "auto_scrolling": false,
+        "comment_composer_open": false,
+        "doc": 2,
+        "find_open": false,
+        "fit": "Width",
+        "grid_zoom": 1.0,
+        "layout": "Continuous",
+        "organize": false,
+        "page": 1,
+        "page_errors": [],
+        "pages_on_screen": [
+          {
+            "page": 1,
+            "rect": [
+              362.0,
+              152.0,
+              891.0,
+              836.5882568359375
+            ]
+          }
+        ],
+        "raster_memory": {
+          "page_bytes": 2898920,
+          "page_count": 2,
+          "pending_requests": 0,
+          "thumbnail_bytes": 0,
+          "thumbnail_count": 0,
+          "thumbnail_demand": 0,
+          "tile_bytes": 0,
+          "tile_count": 0
+        },
+        "selected_comment": null,
+        "selected_pages": [],
+        "viewport": [
+          292.0,
+          124.0,
+          961.0,
+          681.0
+        ],
+        "zoom_percent": 65.0
+      },
+      "mode": "Read",
+      "right_panel": "Comments",
+      "client": {
+        "file": "pdfstrike-review-note-current-client.png",
+        "width": 1008,
+        "height": 681,
+        "pixels_per_point": 1.0,
+        "sha256": "0a22dbf1b2a8196a942e5e28d5c2fa962081fd290dda44ce341eb5fc698dcbf4"
+      },
+      "client_file": "pdfstrike-review-note-current-client.png",
+      "client_sha256": "0a22dbf1b2a8196a942e5e28d5c2fa962081fd290dda44ce341eb5fc698dcbf4",
+      "window": {
+        "file": "pdfstrike-review-note-current-window.png",
+        "width": 1010,
+        "height": 713,
+        "bounds": [
+          7,
+          0,
+          1017,
+          713
+        ],
+        "bounds_method": "DWM extended frame bounds",
+        "title": "native-compat.pdfstrike - PDFStrike",
+        "dpi": 96,
+        "sha256": "2bbc577ca7d5aad74728b698d4b5581cfb8f1cae683b265ceb6e0d50cb8cd18a"
+      },
+      "window_file": "pdfstrike-review-note-current-window.png",
+      "window_sha256": "2bbc577ca7d5aad74728b698d4b5581cfb8f1cae683b265ceb6e0d50cb8cd18a"
+    },
+    {
+      "name": "pdfstrike-form-fields-current",
+      "description": "Current native editor showing the checked-in synthetic AcroForm PDF and its Fields panel; this is a standalone PDF, not a project Forms edit.",
+      "capture_utc": "2026-10-21T20:56:35.4373531Z",
+      "active": {
+        "auto_scrolling": false,
+        "comment_composer_open": false,
+        "doc": 1,
+        "find_open": false,
+        "fit": "None",
+        "grid_zoom": 1.0,
+        "layout": "Single",
+        "organize": false,
+        "page": 1,
+        "page_errors": [],
+        "pages_on_screen": [
+          {
+            "page": 1,
+            "rect": [
+              -11.0,
+              107.0,
+              641.800048828125,
+              951.800048828125
+            ]
+          }
+        ],
+        "raster_memory": {
+          "page_bytes": 2207140,
+          "page_count": 1,
+          "pending_requests": 0,
+          "thumbnail_bytes": 0,
+          "thumbnail_count": 0,
+          "thumbnail_demand": 0,
+          "tile_bytes": 0,
+          "tile_count": 0
+        },
+        "selected_comment": null,
+        "selected_pages": [],
+        "viewport": [
+          0.0,
+          172.0,
+          631.0,
+          681.0
+        ],
+        "zoom_percent": 80.0
+      },
+      "mode": "AllTools",
+      "right_panel": "Fields",
+      "client": {
+        "file": "pdfstrike-form-fields-current-client.png",
+        "width": 1008,
+        "height": 681,
+        "pixels_per_point": 1.0,
+        "sha256": "44bcb37cc690ab0840b4a78778b4b068b6181084c02a40f096ebb57646111957"
+      },
+      "client_file": "pdfstrike-form-fields-current-client.png",
+      "client_sha256": "44bcb37cc690ab0840b4a78778b4b068b6181084c02a40f096ebb57646111957",
+      "window": {
+        "file": "pdfstrike-form-fields-current-window.png",
+        "width": 1010,
+        "height": 713,
+        "bounds": [
+          7,
+          0,
+          1017,
+          713
+        ],
+        "bounds_method": "DWM extended frame bounds",
+        "title": "form-real.pdf - PDFStrike",
+        "dpi": 96,
+        "sha256": "f06b4af908d11f055d6911e7434d458cf9a520242573c0098babb5af71f68607"
+      },
+      "window_file": "pdfstrike-form-fields-current-window.png",
+      "window_sha256": "f06b4af908d11f055d6911e7434d458cf9a520242573c0098babb5af71f68607"
+    }
+  ],
+  "note_evidence": {
+    "text": "Synthetic review note: confirm the packet order before export.",
+    "project_after_sha256": "d9e783627d5a5b9cae0f6578a0ce7767d6eef47ae56f623739c9f45094ebc3d5",
+    "journal_cursor": 2,
+    "saved_note_verified": true
+  },
+  "renderer": "2026-10-21T20:56:30.507Z INFO  [main] pdfstrike_native: renderer: wgpu; adapter: Microsoft Basic Render Driver (Cpu, Dx12); max_texture_dimension_2d: 16384",
+  "finished_utc": "2026-10-21T20:56:35.5082793Z"
+}

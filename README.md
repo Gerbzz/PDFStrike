@@ -15,11 +15,11 @@
 
 PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
 
-**Screenshot scope:** The three images below were captured on October 14 from the reviewed October 11 portable Windows editor checkpoint. [Capture provenance](docs/SCREENSHOT_PROVENANCE.md) records the exact binary and limits.
+**Screenshot scope:** These native Windows screenshots were captured on October 21, 2026 from source `20deb626`, with the merged geometric app icon. The opened fixtures are self-authored test data. [Capture provenance](docs/SCREENSHOT_PROVENANCE.md) records the exact source, executable, hosted checks and image hashes.
 
-![PDFStrike showing the original North Cove review packet in its native editor](assets/screenshots/pdfstrike-project-overview.png)
+![PDFStrike showing the four-page synthetic project and its current geometric titlebar icon](assets/screenshots/current/pdfstrike-project-overview-current-window.png)
 
-*A three-page, self-authored PDF opened in the October 11 portable native editor checkpoint.*
+*The checked-in four-page `native-compat.pdfstrike` project opened in the native project wrapper.*
 
 <p align="center"><a href="#build-and-test">Build and test</a> · <a href="SOURCE_SCOPE.md">Source scope</a> · <a href="#current-status-and-limits">Project limits</a> · <a href="assets/branding">Original artwork</a></p>
 
@@ -33,13 +33,13 @@ Create a project from a PDF, move, rotate, or delete a page, and keep the edits 
 
 The independently reviewed project subset covers manual-coordinate notes and highlights plus named text and checkbox AcroForm edits. It does not establish broad annotation compatibility, ink, arbitrary form types, or signed-file behavior.
 
-![PDFStrike showing a review note on the sample PDF](assets/screenshots/pdfstrike-review-note.png)
+![PDFStrike showing a saved fictional note and its yellow page marker](assets/screenshots/current/pdfstrike-review-note-current-window.png)
 
-*The native project panel saved a review note, shown as a marker on page one.*
+*The native Comments panel saved the fictional note shown on page one. The capture helper also verified its text in the saved project journal.*
 
-![PDFStrike showing a populated reviewer field on page three](assets/screenshots/pdfstrike-form-field.png)
+![PDFStrike showing the standalone synthetic PDF and its two-field Fields panel](assets/screenshots/current/pdfstrike-form-fields-current-window.png)
 
-*The native Forms panel set `reviewer.name` to a fictional value in the sample project; the page preview displays that value.*
+*The standalone `form-real.pdf` fixture shows `contact.name` and `approved` in the native Fields panel. This view does not demonstrate a project Forms edit or a populated field.*
 
 ### Export a separate PDF
 
@@ -58,7 +58,7 @@ cargo test --locked -p pdfstrike-project
 cargo build --locked -p pdfstrike-native --bin pdfstrike-native
 ```
 
-The clean standalone source passed 15 root and 14 native project tests and built the native editor. The independent review also exercised a native rotation and CLI reopen. A later live capture used a retained portable native binary to open a self-authored three-page project, save a note and a named text field, and display them in the preview. These are bounded checks, not a release or broad PDF compatibility claim. [Screenshot provenance](docs/SCREENSHOT_PROVENANCE.md) records the capture and its limits.
+The captured source passed hosted checks: 57 redaction tests on Linux and Windows, plus 14 native project tests, 15 root CLI tests and one engine redaction transaction/undo control on Windows (144 passing test executions total). The Windows native editor built successfully, opened the checked-in synthetic project, saved the fictional note, and displayed the standalone form fixture. These are bounded source and hosted UI checks. [Screenshot provenance](docs/SCREENSHOT_PROVENANCE.md) records the capture and its limits; Room interactive and installer acceptance remain unverified.
 
 ## Current status and limits
 
