@@ -9,14 +9,14 @@ mod windows_manifest;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../../assets/app-icon/pdfstrike.ico");
+    println!("cargo:rerun-if-changed=../../assets/app-icon/pdfstrike-geometric.ico");
     println!("cargo:rerun-if-changed=src/windows_manifest.rs");
     println!("cargo:rerun-if-env-changed=PDFSTRIKE_REQUIRE_WINRES");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
     let mut res = winresource::WindowsResource::new();
-    res.set_icon("../../assets/app-icon/pdfstrike.ico")
+    res.set_icon("../../assets/app-icon/pdfstrike-geometric.ico")
         .set_manifest(windows_manifest::WINDOWS_MANIFEST)
         .set("ProductName", "PDFStrike")
         .set("FileDescription", "PDFStrike local PDF editor")

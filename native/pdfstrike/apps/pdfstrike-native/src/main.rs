@@ -43,9 +43,9 @@ mod windows_manifest;
 const APP_ID: &str = "local.pdfstrike.app";
 
 #[cfg(target_os = "macos")]
-const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/pdfstrike-1024.png");
+const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/pdfstrike-geometric-1024.png");
 #[cfg(not(target_os = "macos"))]
-const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/pdfstrike-256.png");
+const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/pdfstrike-geometric-256.png");
 
 /// The settings folder: `app.ron` and the `logs` folder. Portable mode keeps
 /// them beside the executable in `PDFStrikeData`.

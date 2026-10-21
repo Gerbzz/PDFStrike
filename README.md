@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/PDFStrike.png" alt="Original PDFStrike beaver logo" width="160" height="160">
+  <img src="assets/branding/PDFStrike-geometric.svg" alt="PDFStrike: a review band binds two offset pages" width="160" height="160">
 </p>
 
 <h1 align="center">PDFStrike</h1>
