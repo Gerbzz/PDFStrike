@@ -21,7 +21,7 @@ Both updates depend on removing stale original XObject resource aliases before a
 
 Review adaptations also resolve indirect OCMD type/operator values, remove unused Form-owned alias paths, and preserve persistent graphics state and text advances when suppressing hidden painting. The indirect-value handling follows [PDF syntax guidance, section 7.3.10](https://pdf-issues.pdfa.org/32000-2-2020/clause07.html); optional-content state handling follows [Adobe PDF Reference 1.6, section 4.10.2](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.6.pdf). Hidden clipping text and zero-size text with character/word spacing are refused when a safe state-preserving rewrite cannot be established.
 
-Publication review additionally covers indirect XObject subtypes and bounded structural checks for original-object aliases in other resource containers and surviving XObject metadata. Unsupported alias paths cause failure rather than a successful incomplete cleanup. ExtGState font selection is included in graphics-state tracking, including save/restore; hidden text with unestablished font advances (including vertical or embedded-CMap writing direction) is refused.
+Publication review additionally covers indirect XObject subtypes and bounded structural checks for original-object aliases in other resource containers, malformed XObject values, and surviving XObject metadata. Unsupported alias paths cause failure rather than a successful incomplete cleanup. ExtGState font selection is included in graphics-state tracking, including save/restore; hidden text with unestablished font advances (including indirect font subtypes or composite encodings beyond this metrics reader's Identity-H support) is refused.
 
 ## Optional patched-donor fixtures
 

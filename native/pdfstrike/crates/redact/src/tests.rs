@@ -720,6 +720,48 @@ fn hidden_ocmd_removal_preserves_later_graphics_state_and_text_advance() {
 }
 
 #[test]
+fn malformed_xobject_resource_shapes_refuse_incomplete_cleanup() {
+    for (alias, container) in [
+        ("[7 0 R]", b"null".to_vec()),
+        ("8 0 R", b"[7 0 R]".to_vec()),
+        ("8 0 R", b"<< /Subtype /Form /Resources << /XObject << /Alias 7 0 R >> >> >>".to_vec()),
+        ("8 0 R", b"7 0 R".to_vec()),
+        ("8 0 R", stream("/Subtype /Form /BBox [0 0 1 1] /Resources [7 0 R]", b"")),
+        ("8 0 R", stream("/Subtype /Form /BBox [0 0 1 1] /Resources << /XObject [7 0 R] >>", b"")),
+    ] {
+        let mut doc = one_page(
+            b"q 200 0 0 100 0 0 cm /Im Do Q",
+            &format!("/XObject << /Im 7 0 R /Unused {alias} >>"),
+            vec![stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]), container],
+        );
+        mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+        assert_eq!(apply(&mut doc, None), Err(RedactError::Residue(1)), "{alias}");
+    }
+}
+
+#[test]
+fn malformed_page_resources_refuse_retaining_a_replaced_original() {
+    let mut doc = one_page(
+        b"q 200 0 0 100 0 0 cm /Im Do Q",
+        "/XObject << /Im 7 0 R >>",
+        vec![stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234])],
+    );
+    let page = doc.add(Object::Dict(Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Page")),
+        (b"Parent".to_vec(), Object::Ref(ObjRef::new(2, 0))),
+        (b"MediaBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 300.into(), 300.into()])),
+        (b"Resources".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0))])),
+    ])));
+    doc.update_dict(ObjRef::new(2, 0), |d| {
+        d.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(3, 0)), Object::Ref(page)]));
+        d.set(b"Count".to_vec(), 2);
+    })
+    .unwrap();
+    mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+    assert_eq!(apply(&mut doc, None), Err(RedactError::Residue(1)));
+}
+
+#[test]
 fn hidden_text_advances_use_extgstate_fonts_and_restore_them_with_q() {
     use crate::sanitize::{Hidden, remove_hidden};
     for (state, expected_x) in [("/G gs", 70.0), ("q /G gs Q", 40.0)] {
@@ -741,6 +783,40 @@ fn hidden_text_advances_use_extgstate_fonts_and_restore_them_with_q() {
         let visible = lines.iter().find(|line| line.text.contains("VISIBLE")).unwrap();
         assert!((visible.rect[0] - expected_x).abs() < 0.001, "{state}: {lines:?}");
         assert_no_stream_payload(&saved, b"SECRET");
+    }
+}
+
+#[test]
+fn hidden_composite_text_refuses_unestablished_font_advances() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    for (subtype, encoding) in [("12 0 R", "Identity-H"), ("/Type0", "UniJIS-UCS2-H"), ("/Type0", "V"), ("/Type0", "Identity-H")] {
+        for state in ["/F2 10 Tf", "/G gs"] {
+            let data = format!("BT /F1 10 Tf 10 100 Td {state} /OC /M BDC <0001> Tj EMC /F1 10 Tf (VISIBLE) Tj ET");
+            let mut doc = one_page(
+                data.as_bytes(),
+                "/Font << /F1 5 0 R /F2 7 0 R >> /ExtGState << /G << /Font [7 0 R 10] >> >> /Properties << /M 11 0 R >>",
+                vec![
+                    format!("<< /Type /Font /Subtype {subtype} /BaseFont /X /Encoding /{encoding} /DescendantFonts [<< /Subtype /CIDFontType2 /DW 2000 >>] >>")
+                        .into_bytes(),
+                    b"null".to_vec(),
+                    b"<< /Type /OCG /Name (On) >>".to_vec(),
+                    b"null".to_vec(),
+                    b"<< /Type /OCMD /OCGs [9 0 R] /P /AllOff >>".to_vec(),
+                    b"/Type0".to_vec(),
+                ],
+            );
+            let result = remove_hidden(&mut doc, &[Hidden::HiddenLayers]);
+            if subtype == "/Type0" && encoding == "Identity-H" {
+                result.unwrap();
+                let saved = reopen(&doc);
+                let lines = pdfcraft_edit::text_lines(&saved, 0).unwrap();
+                let visible = lines.iter().find(|line| line.text.contains("VISIBLE")).unwrap();
+                assert!((visible.rect[0] - 30.0).abs() < 0.001, "{state}: {lines:?}");
+                assert_no_stream_payload(&saved, &[0, 1]);
+            } else {
+                assert_eq!(result, Err(RedactError::Residue(1)), "{subtype} {encoding} {state}");
+            }
+        }
     }
 }
 

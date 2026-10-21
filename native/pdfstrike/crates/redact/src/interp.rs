@@ -362,11 +362,18 @@ fn name_is(doc: &Document, dict: &Dict, key: &[u8], name: &[u8]) -> bool {
 }
 
 fn known_advance_font(doc: &Document, dict: &Dict) -> bool {
-    if name_is(doc, dict, b"Subtype", b"Type3") {
+    // Match this snapshot's Metrics reader: it reads Subtype directly and only
+    // implements the predefined two-byte identity CMap for composite fonts.
+    let Some(subtype) = dict.name(b"Subtype") else { return false };
+    let encoding = dict.get(b"Encoding").map(|value| doc.resolve(value));
+    if subtype == b"Type0" {
+        return encoding.as_deref().and_then(Object::as_name) == Some(b"Identity-H");
+    }
+    if !matches!(subtype, b"Type1" | b"MMType1" | b"TrueType") {
         return false;
     }
-    match dict.get(b"Encoding").map(|value| doc.resolve(value)).as_deref() {
-        Some(Object::Name(name)) => !name.ends_with(b"-V"),
+    match encoding.as_deref() {
+        Some(Object::Name(name)) => name != b"V" && !name.ends_with(b"-V"),
         // This snapshot cannot establish an embedded CMap's writing direction here.
         Some(Object::Stream(_)) => false,
         _ => true,
@@ -493,7 +500,8 @@ fn reject_unsupported_aliases(doc: &Document, res: &Dict, doomed: &HashSet<ObjRe
     let mut budget = 100_000;
     let mut path = HashSet::new();
     for (key, value) in res.iter() {
-        if key != b"XObject" && references_doomed(doc, value, doomed, &mut path, 0, &mut budget)? {
+        let supported_xobjects = key == b"XObject" && matches!(&*doc.resolve(value), Object::Dict(_));
+        if !supported_xobjects && references_doomed(doc, value, doomed, &mut path, 0, &mut budget)? {
             return Err(RedactError::Residue(1));
         }
     }
@@ -502,12 +510,20 @@ fn reject_unsupported_aliases(doc: &Document, res: &Dict, doomed: &HashSet<ObjRe
         if value.as_ref().is_some_and(|r| doomed.contains(&r)) {
             continue;
         }
-        let object = doc.resolve(value);
-        let Some(dict) = object.as_dict() else { continue };
-        let form = name_is(doc, dict, b"Subtype", b"Form");
+        // Only stream XObjects enter the supported recursive cleanup. Inspect
+        // malformed containers (including reference chains) without exemptions.
+        let object = value.as_ref().map_or_else(|| doc.resolve(value), |reference| doc.get(reference));
+        let Object::Stream(stream) = &*object else {
+            if references_doomed(doc, value, doomed, &mut path, 0, &mut budget)? {
+                return Err(RedactError::Residue(1));
+            }
+            continue;
+        };
+        let dict = &stream.dict;
+        let form = value.as_ref().is_some() && name_is(doc, dict, b"Subtype", b"Form");
         for (key, value) in dict.iter() {
             // Form-owned resources are handled recursively by unlink_form_aliases.
-            if form && key == b"Resources" {
+            if form && key == b"Resources" && matches!(&*doc.resolve(value), Object::Dict(_)) {
                 continue;
             }
             if references_doomed(doc, value, doomed, &mut path, 0, &mut budget)? {
@@ -650,9 +666,15 @@ pub(crate) fn unlink_doomed(doc: &mut Document, doomed: &[ObjRef]) -> Result<(),
     let roots: Vec<ObjRef> = holders.iter().map(|(node, _)| *node).collect();
     let affected = affected_forms(doc, &roots, doomed)?;
     for (node, users) in holders {
-        let Some(mut res) = doc.get(node).as_dict().and_then(|d| d.get(b"Resources")).and_then(|r| doc.resolve(r).as_dict().cloned()) else {
+        let Some(value) = doc.get(node).as_dict().and_then(|d| d.get(b"Resources")).cloned() else { continue };
+        let object = doc.resolve(&value);
+        let Object::Dict(resources) = &*object else {
+            if references_doomed(doc, &value, &affected, &mut HashSet::new(), 0, &mut 100_000)? {
+                return Err(RedactError::Residue(1));
+            }
             continue;
         };
+        let mut res = resources.clone();
         reject_unsupported_aliases(doc, &res, &affected)?;
         let xo = res_dict(doc, &res, b"XObject");
         let names: Vec<Vec<u8>> = xo.iter().filter(|(_, v)| v.as_ref().is_some_and(|r| affected.contains(&r))).map(|(n, _)| n.to_vec()).collect();
