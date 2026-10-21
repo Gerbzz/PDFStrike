@@ -6,6 +6,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/redaction.yml'
+      - 'scripts/capture-current-ui.ps1'
       - 'native/pdfstrike/**'
       - 'apps/pdfstrike/**'
       - 'vendor/pdfcraft/**'
@@ -70,3 +71,36 @@ jobs:
       - name: Native editor build
         if: runner.os == 'Windows'
         run: cargo build --locked -p pdfstrike-native --bin pdfstrike-native
+      - name: Record native build provenance
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: .
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          $nativeTree = (git rev-parse "${commit}:native/pdfstrike").Trim()
+          $executableHash = (Get-FileHash native/pdfstrike/target/debug/pdfstrike-native.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{ source_commit = $commit; native_source_tree = $nativeTree; executable_sha256 = $executableHash; run_id = $env:GITHUB_RUN_ID; run_attempt = $env:GITHUB_RUN_ATTEMPT } | ConvertTo-Json | Set-Content native-build.json -Encoding utf8
+      - name: Retain the native development build
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfstrike-native-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            native/pdfstrike/target/debug/pdfstrike-native.exe
+            native-build.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Capture the current native UI with synthetic fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: .
+        timeout-minutes: 5
+        run: ./scripts/capture-current-ui.ps1 -OutputDirectory artifacts/current-ui
+      - name: Retain native UI captures and provenance
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfstrike-current-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/current-ui/
+          if-no-files-found: error
+          retention-days: 14
