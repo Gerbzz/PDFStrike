@@ -506,10 +506,8 @@ fn reject_unsupported_aliases(doc: &Document, res: &Dict, doomed: &HashSet<ObjRe
         }
     }
     for (_, value) in res_dict(doc, res, b"XObject").iter() {
-        // A supported original still drawn outside a mark may remain intentionally.
-        if value.as_ref().is_some_and(|r| doomed.contains(&r)) {
-            continue;
-        }
+        // A candidate can survive because it is still drawn. Its metadata must
+        // be checked too; only supported resource edges receive an exemption.
         // Only stream XObjects enter the supported recursive cleanup. Inspect
         // malformed containers (including reference chains) without exemptions.
         let object = value.as_ref().map_or_else(|| doc.resolve(value), |reference| doc.get(reference));

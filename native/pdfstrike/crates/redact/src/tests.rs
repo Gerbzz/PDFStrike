@@ -740,6 +740,38 @@ fn malformed_xobject_resource_shapes_refuse_incomplete_cleanup() {
 }
 
 #[test]
+fn surviving_nested_form_metadata_cannot_retain_a_replaced_original() {
+    for private_alias in [false, true] {
+        let mut doc = one_page(
+            b"/Outer Do",
+            "/XObject << /Outer 9 0 R >>",
+            vec![
+                stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
+                stream(
+                    &format!(
+                        "/Subtype /Form /BBox [0 0 1 1] /Resources << /XObject << /Alias 7 0 R >> >> {}",
+                        if private_alias { "/PieceInfo << /Private 7 0 R >>" } else { "" }
+                    ),
+                    b"",
+                ),
+                stream(
+                    "/Subtype /Form /BBox [0 0 300 300] /Resources << /XObject << /Im 7 0 R /Fm 8 0 R >> >>",
+                    b"q 200 0 0 100 0 0 cm /Im Do Q q 50 0 0 50 220 220 cm /Fm Do Q",
+                ),
+            ],
+        );
+        mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+        let result = apply(&mut doc, None);
+        if private_alias {
+            assert_eq!(result, Err(RedactError::Residue(1)));
+        } else {
+            result.unwrap();
+            assert_no_stream_payload(&reopen(&doc), &[123, 234]);
+        }
+    }
+}
+
+#[test]
 fn malformed_page_resources_refuse_retaining_a_replaced_original() {
     let mut doc = one_page(
         b"q 200 0 0 100 0 0 cm /Im Do Q",
