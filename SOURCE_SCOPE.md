@@ -8,6 +8,19 @@ Original donor notices mention brand, showcase, and optional OCR/font inputs omi
 
 Excluded: task-local build/target caches, source archive, captured media, private projects, OCR models, unrelated Office apps, and machine-specific evidence. The packaged fixture PDFs are self-authored synthetic tests. Distribution notices for a future binary and installer behavior require separate review.
 
+## Redaction backports (2026-10-21)
+
+The native `crates/redact` implementation additionally adapts these PdfCraft updates:
+
+- [`d695bc56545944fe9c7181901c61d0bf1c11c887`](https://github.com/storytold/pdfcraft/commit/d695bc56545944fe9c7181901c61d0bf1c11c887): evaluate OCMD policies and bounded visibility expressions during hidden-layer sanitization, cache decisions, retain off-group state needed by surviving content, and count hidden/undecodable/depth-limited XObjects during verification.
+- [`236ce9a064379854447fec59dcdeb61bcbea22bc`](https://github.com/storytold/pdfcraft/commit/236ce9a064379854447fec59dcdeb61bcbea22bc): clear every image sample whose transformed footprint intersects a redaction region, conservatively including rotated/skewed footprints.
+
+The corresponding upstream regression tests are retained, with the image stream helper adapted to this older source and additional checks for saved payloads, shared/inherited resources, masks, packed samples, and malformed expressions. These are targeted backports, not a replacement of the pinned donor snapshot above. Original donor licenses and notices remain intact.
+
+Both updates depend on removing stale original XObject resource aliases before a full save. This older snapshot lacked upstream's resource cleanup, so the port includes the required tracking and page/Form/shared-resource cleanup in the native redaction crate. A live draw or unaffected page keeps its original object. Cleanup fails when this interpreter cannot establish resource use, including potential inherited Type 3 glyph, pattern, or soft-mask users. The native engine's existing whole-document transaction and the separate PDFStrike wrappers/project cores are unchanged. No dependency versions change.
+
+Review adaptations also resolve indirect OCMD type/operator values, remove unused Form-owned alias paths, and preserve persistent graphics state and text advances when suppressing hidden painting. The indirect-value handling follows [PDF syntax guidance, section 7.3.10](https://pdf-issues.pdfa.org/32000-2-2020/clause07.html); optional-content state handling follows [Adobe PDF Reference 1.6, section 4.10.2](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.6.pdf). Hidden clipping text and zero-size text with character/word spacing are refused when a safe state-preserving rewrite cannot be established.
+
 ## Optional patched-donor fixtures
 
 The four PNGs under `native/pdfstrike/vendor/winit/examples/data/` were restored byte-for-byte from the locally cached **winit 0.30.13** crates.io source package. They are example-only, not PDFStrike runtime art. The cached package and this patched vendor copy carry the same Apache-2.0 `LICENSE`; their source SHA-256 values are recorded in the local candidate verification report. No example was compiled during source preparation.

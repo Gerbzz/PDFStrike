@@ -136,12 +136,14 @@ fn hidden_layers(doc: &Document) -> Vec<ObjRef> {
 }
 
 /// Glyphs of hidden text, or content of hidden layers, on every page (`write` = remove them).
-fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Result<usize, RedactError> {
+fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Result<(usize, std::collections::HashSet<ObjRef>), RedactError> {
     let off = if layers { hidden_layers(doc) } else { Vec::new() };
-    if !text && off.is_empty() {
-        return Ok(0);
+    if !text && !layers {
+        return Ok((0, std::collections::HashSet::new()));
     }
     let mut total = 0;
+    let mut retained_off_layers = std::collections::HashSet::new();
+    let mut doomed = Vec::new();
     let n = pdfcraft_model::pages(doc).len();
     for pi in 0..n {
         let page = pdfcraft_model::pages(doc).swap_remove(pi);
@@ -159,13 +161,21 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
             let c = page.crop(doc);
             scope.hidden_text = Some([c[0].min(c[2]), c[1].min(c[3]), c[0].max(c[2]), c[1].max(c[3])]);
         }
-        scope.hidden_layers = off.clone();
+        scope.hidden_layers = off.iter().copied().collect();
+        scope.layers_enabled = layers;
         let out = process(doc, &mut scope, &data, &resources, Matrix::IDENTITY);
+        if let Some(error) = out.error {
+            return Err(error);
+        }
         let blocks = scope.layer_blocks;
-        total += out.residue + blocks + report.glyphs;
+        let glyphs = scope.report.glyphs;
+        retained_off_layers.extend(std::mem::take(&mut scope.retained_off_layers));
+        drop(scope);
+        total += out.residue + blocks + glyphs;
         if !write {
             continue;
         }
+        doomed.extend_from_slice(&out.doomed);
         let mut new_list = list.clone();
         let mut changed = false;
         for (i, new) in out.streams.into_iter().enumerate() {
@@ -178,22 +188,25 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
             new_list[i] = Object::Ref(doc.add(Object::Stream(pdfcraft_cos::Stream::flate(dict, &bytes))));
             changed = true;
         }
-        if changed || !out.xobjects.is_empty() {
+        if changed || !out.xobjects.is_empty() || !out.doomed.is_empty() {
             let mut res = resources;
-            if !out.xobjects.is_empty() {
-                let mut xo = res.get(b"XObject").and_then(|x| doc.resolve(x).as_dict().cloned()).unwrap_or_default();
-                for (n, r) in &out.xobjects {
-                    xo.set(n.clone(), Object::Ref(*r));
-                }
-                res.set(b"XObject".to_vec(), Object::Dict(xo));
+            let mut xo = res.get(b"XObject").and_then(|x| doc.resolve(x).as_dict().cloned()).unwrap_or_default();
+            for (name, reference) in &out.xobjects {
+                xo.set(name.clone(), Object::Ref(*reference));
             }
+            res.set(b"XObject".to_vec(), Object::Dict(xo));
+            let mut cleaned_page = page.dict.clone();
+            cleaned_page.set(b"Contents".to_vec(), Object::Array(new_list.clone()));
+            let (_, page_content) = page_streams(doc, &cleaned_page, pi)?;
+            crate::interp::prune_xobjects(doc, &mut res, &out.doomed, &page_content)?;
             doc.update_dict(page.obj, |d| {
                 d.set(b"Contents".to_vec(), Object::Array(new_list));
                 d.set(b"Resources".to_vec(), Object::Dict(res));
             })?;
         }
     }
-    Ok(total)
+    crate::interp::unlink_doomed(doc, &doomed)?;
+    Ok((total, retained_off_layers))
 }
 
 /// How many items each category would remove (categories with nothing are included as 0).
@@ -216,10 +229,10 @@ pub fn scan(doc: &Document) -> Vec<(Hidden, usize)> {
                 Hidden::Attachments => sub(doc, &names, b"EmbeddedFiles").map_or(0, |t| name_tree_len(doc, &t, 0)) + count_sub(b"FileAttachment"),
                 Hidden::Comments => annots.iter().filter(|a| is_comment(a.name(b"Subtype").unwrap_or(b""))).count(),
                 Hidden::FormFields => pdfcraft_forms::fields(doc).len(),
-                Hidden::HiddenText => content_pass(&mut doc2, true, false, false).unwrap_or(0),
+                Hidden::HiddenText => content_pass(&mut doc2, true, false, false).map(|(n, _)| n).unwrap_or(0),
                 Hidden::HiddenLayers => {
                     let off = hidden_layers(doc).len();
-                    if off == 0 { 0 } else { off + content_pass(&mut doc2, false, true, false).unwrap_or(0) }
+                    off + content_pass(&mut doc2, false, true, false).map(|(n, _)| n).unwrap_or(0)
                 }
                 Hidden::Bookmarks => sub(doc, &cat, b"Outlines").map_or(0, |o| outline_len(doc, o.get(b"First"), 0)),
                 Hidden::LinksActionsScripts => {
@@ -245,9 +258,11 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
     let mut done = Vec::new();
     // Content first (it needs the layers and the form still in place).
     let (text, layers) = (which.contains(&Hidden::HiddenText), which.contains(&Hidden::HiddenLayers));
-    if (text && count(Hidden::HiddenText) > 0) || (layers && count(Hidden::HiddenLayers) > 0) {
-        content_pass(doc, text, layers, true)?;
-    }
+    let retained_off_layers = if (text && count(Hidden::HiddenText) > 0) || (layers && count(Hidden::HiddenLayers) > 0) {
+        content_pass(doc, text, layers, true)?.1
+    } else {
+        std::collections::HashSet::new()
+    };
     if which.contains(&Hidden::FormFields) && count(Hidden::FormFields) > 0 {
         // Fields without appearances get one first, so their values stay visible.
         for f in pdfcraft_forms::fields(doc) {
@@ -353,7 +368,7 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             Hidden::HiddenLayers if !off.is_empty() => {
                 // The off layers leave the configuration (their content is gone already).
                 if let Some(mut oc) = sub(doc, &cat, b"OCProperties") {
-                    let keep = |o: &Object| !o.as_ref().is_some_and(|r| off.contains(&r));
+                    let keep = |o: &Object| !o.as_ref().is_some_and(|r| off.contains(&r) && !retained_off_layers.contains(&r));
                     if let Some(Object::Array(a)) = oc.get(b"OCGs").map(|g| (*doc.resolve(g)).clone()) {
                         oc.set(b"OCGs".to_vec(), Object::Array(a.into_iter().filter(keep).collect()));
                     }

@@ -5,6 +5,701 @@ use pdfcraft_cos::{Document, SaveOptions, write_full, write_incremental};
 
 use super::*;
 
+// Ported from PdfCraft d695bc56545944fe9c7181901c61d0bf1c11c887 and
+// 236ce9a064379854447fec59dcdeb61bcbea22bc; see SOURCE_SCOPE.md.
+fn named_image(doc: &Document, page: usize, name: &[u8]) -> Option<Vec<u8>> {
+    let page = &pdfcraft_model::pages(doc)[page];
+    let resources = doc.resolve(page.dict.get(b"Resources")?);
+    let xobjects = doc.resolve(resources.as_dict()?.get(b"XObject")?);
+    let image = doc.resolve(xobjects.as_dict()?.get(name)?);
+    match &*image {
+        Object::Stream(s) => s.decoded().ok(),
+        _ => None,
+    }
+}
+
+fn assert_no_stream_payload(doc: &Document, payload: &[u8]) {
+    for number in doc.object_numbers() {
+        if let Object::Stream(s) = &*doc.get(ObjRef::new(number, doc.generation(number))) {
+            let decoded = s.decoded().unwrap();
+            assert!(!decoded.windows(payload.len()).any(|w| w == payload), "payload survived in stream {number}");
+        }
+    }
+}
+
+#[test]
+fn hidden_ocmd_all_on_content_is_removed_before_its_off_group_is_unlinked() {
+    use crate::sanitize::{Hidden, remove_hidden};
+
+    let mut doc = one_page(
+        b"BT /F1 10 Tf 10 200 Td (PUBLIC) Tj ET /OC /M BDC BT /F1 10 Tf 10 100 Td (SECRET) Tj ET EMC",
+        "/Properties << /M 9 0 R >>",
+        vec![
+            b"<< /Type /OCG /Name (On) >>".to_vec(),
+            b"<< /Type /OCG /Name (Off) >>".to_vec(),
+            b"<< /Type /OCMD /OCGs [7 0 R 8 0 R] /P /AllOn >>".to_vec(),
+        ],
+    );
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |d| {
+        d.set(
+            b"OCProperties".to_vec(),
+            Object::Dict(pdfcraft_cos::Dict::from_iter([
+                (b"OCGs".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+                (
+                    b"D".to_vec(),
+                    Object::Dict(pdfcraft_cos::Dict::from_iter([
+                        (b"Order".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+                        (b"OFF".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(8, 0))])),
+                    ])),
+                ),
+            ])),
+        );
+    })
+    .unwrap();
+
+    let before = pdfcraft_edit::text_lines(&doc, 0).unwrap();
+    assert!(before.iter().any(|line| line.text.contains("PUBLIC")));
+    assert!(before.iter().any(|line| line.text.contains("SECRET")), "extractor sees source text before sanitization");
+    remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    let lines = pdfcraft_edit::text_lines(&saved, 0).unwrap();
+    assert!(lines.iter().any(|line| line.text.contains("PUBLIC")), "visible content remains: {lines:?}");
+    assert!(!lines.iter().any(|line| line.text.contains("SECRET")), "hidden text is extractable: {lines:?}");
+    assert!(!write_full(&saved, &SaveOptions::default()).unwrap().windows(6).any(|w| w == b"SECRET"));
+}
+
+#[test]
+fn hidden_ocmd_content_in_a_form_and_nested_marked_blocks_is_removed() {
+    use crate::sanitize::{Hidden, remove_hidden};
+
+    let mut doc = one_page(
+        b"/Fm Do",
+        "/Properties << /M 9 0 R >> /XObject << /Fm 10 0 R >>",
+        vec![
+            b"<< /Type /OCG /Name (On) >>".to_vec(),
+            b"<< /Type /OCG /Name (Off) >>".to_vec(),
+            b"<< /Type /OCMD /OCGs [7 0 R 8 0 R] /P /AllOn >>".to_vec(),
+            stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 300 300] /Resources << /Font << /F1 5 0 R >> /Properties << /M 9 0 R >> >>",
+                b"/OC /M BDC /OC /M BDC BT /F1 10 Tf 10 100 Td (SECRET) Tj ET EMC EMC",
+            ),
+        ],
+    );
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |d| {
+        d.set(
+            b"OCProperties".to_vec(),
+            Object::Dict(Dict::from_iter([
+                (b"OCGs".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+                (b"D".to_vec(), Object::Dict(Dict::from_iter([(b"OFF".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(8, 0))]))]))),
+            ])),
+        );
+    })
+    .unwrap();
+
+    remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    assert!(!pdfcraft_edit::text_lines(&saved, 0).unwrap().iter().any(|line| line.text.contains("SECRET")));
+    assert_no_stream_payload(&saved, b"SECRET");
+}
+
+#[test]
+fn hidden_ocmd_alloff_is_sanitized_when_every_group_is_on() {
+    use crate::sanitize::{Hidden, remove_hidden, scan};
+
+    let mut doc = one_page(
+        b"/OC /M BDC BT /F1 10 Tf 10 100 Td (SECRET) Tj ET EMC",
+        "/Properties << /M 9 0 R >>",
+        vec![
+            b"<< /Type /OCG /Name (On) >>".to_vec(),
+            b"<< /Type /OCG /Name (Unused) >>".to_vec(),
+            b"<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>".to_vec(),
+        ],
+    );
+    let counts = scan(&doc);
+    assert!(counts.iter().any(|(h, n)| *h == Hidden::HiddenLayers && *n > 0), "{counts:?}");
+    remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    assert!(!pdfcraft_edit::text_lines(&saved, 0).unwrap().iter().any(|line| line.text.contains("SECRET")));
+}
+
+#[test]
+fn hidden_ve_not_is_sanitized_when_its_group_is_on() {
+    use crate::sanitize::{Hidden, remove_hidden, scan};
+
+    let mut doc = one_page(
+        b"/OC /M BDC BT /F1 10 Tf 10 100 Td (SECRET) Tj ET EMC",
+        "/Properties << /M 9 0 R >>",
+        vec![b"<< /Type /OCG /Name (On) >>".to_vec(), b"<< /Type /OCG /Name (Unused) >>".to_vec(), b"<< /Type /OCMD /VE [/Not 7 0 R] >>".to_vec()],
+    );
+    let counts = scan(&doc);
+    assert!(counts.iter().any(|(h, n)| *h == Hidden::HiddenLayers && *n > 0), "{counts:?}");
+    remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    assert!(!pdfcraft_edit::text_lines(&saved, 0).unwrap().iter().any(|line| line.text.contains("SECRET")));
+}
+
+fn all_on_ocmd_xobject(subtype: &str, policy: &str) -> Document {
+    let membership = match policy {
+        "AllOff" => "<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>",
+        "Not" => "<< /Type /OCMD /VE [/Not 7 0 R] >>",
+        _ => "<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>",
+    };
+    let (object_number, oc) = if policy == "DirectAllOff" { (8, membership) } else { (9, "8 0 R") };
+    let xobject = match subtype {
+        "Image" => stream(
+            &format!("/Type /XObject /Subtype /Image /Width 4 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /OC {oc}"),
+            b"PRIVATE_HIDDEN_XOBJECT_IMAGE",
+        ),
+        _ => stream(
+            &format!("/Type /XObject /Subtype /Form /BBox [0 0 300 300] /Resources << /Font << /F1 5 0 R >> >> /OC {oc}"),
+            b"BT /F1 10 Tf 10 100 Td (PRIVATE_HIDDEN_XOBJECT_FORM) Tj ET",
+        ),
+    };
+    let mut extras = vec![b"<< /Type /OCG /Name (On) >>".to_vec()];
+    if object_number == 9 {
+        extras.push(membership.as_bytes().to_vec());
+    }
+    extras.push(xobject);
+    let mut doc = one_page(b"/X Do", &format!("/XObject << /X {object_number} 0 R >>"), extras);
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |d| {
+        d.set(
+            b"OCProperties".to_vec(),
+            Object::Dict(Dict::from_iter([
+                (b"OCGs".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0))])),
+                (b"D".to_vec(), Object::Dict(Dict::from_iter([(b"BaseState".to_vec(), Object::name("ON"))]))),
+            ])),
+        );
+    })
+    .unwrap();
+    doc
+}
+
+#[test]
+fn hidden_all_on_ocmd_image_and_form_xobjects_are_counted_and_removed() {
+    use crate::sanitize::{Hidden, remove_hidden, scan};
+
+    let mut failures = Vec::new();
+    for subtype in ["Image", "Form"] {
+        for policy in ["AllOff", "Not"] {
+            let mut doc = all_on_ocmd_xobject(subtype, policy);
+            let before = scan(&doc);
+            let hidden_count = before.iter().find(|(h, _)| *h == Hidden::HiddenLayers).map_or(0, |(_, n)| *n);
+            if hidden_count == 0 {
+                failures.push(format!("{subtype} /{policy} was not counted: {before:?}"));
+            }
+
+            match remove_hidden(&mut doc, &[Hidden::HiddenLayers]) {
+                Ok(removed) if removed.iter().any(|(h, n)| *h == Hidden::HiddenLayers && *n > 0) => {}
+                Ok(removed) => failures.push(format!("{subtype} /{policy} remove report is empty: {removed:?}")),
+                Err(error) => failures.push(format!("{subtype} /{policy} remove failed: {error}")),
+            }
+            let bytes = write_full(&doc, &SaveOptions::default()).unwrap();
+            if bytes.windows(b"PRIVATE_HIDDEN_XOBJECT_IMAGE".len()).any(|w| w == b"PRIVATE_HIDDEN_XOBJECT_IMAGE") {
+                failures.push(format!("{subtype} /{policy} image payload remains in full save"));
+            }
+            if bytes.windows(b"PRIVATE_HIDDEN_XOBJECT_FORM".len()).any(|w| w == b"PRIVATE_HIDDEN_XOBJECT_FORM") {
+                failures.push(format!("{subtype} /{policy} Form payload remains in full save"));
+            }
+            let saved = Document::open(Arc::new(bytes)).unwrap();
+            if pdfcraft_edit::text_lines(&saved, 0).unwrap().iter().any(|line| line.text.contains("PRIVATE_HIDDEN_XOBJECT_FORM")) {
+                failures.push(format!("{subtype} /{policy} Form text remains extractable"));
+            }
+            if !pdfcraft_edit::page_images(&saved, 0).unwrap().is_empty() {
+                failures.push(format!("{subtype} /{policy} image remains on the page"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn repeated_image_with_direct_alloff_membership_is_counted_per_draw() {
+    use crate::sanitize::{Hidden, scan};
+
+    let mut doc = all_on_ocmd_xobject("Image", "DirectAllOff");
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let contents = doc.add(Object::Stream(pdfcraft_cos::Stream::flate(Dict::new(), b"/X Do /X Do /X Do")));
+    doc.update_dict(page, |d| d.set(b"Contents".to_vec(), Object::Ref(contents))).unwrap();
+
+    let original = write_full(&doc, &SaveOptions::default()).unwrap();
+    let counts = scan(&doc);
+    assert_eq!(counts.iter().find(|(h, _)| *h == Hidden::HiddenLayers).map(|(_, n)| *n), Some(3), "{counts:?}");
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), original, "Verify scan must not mutate the document");
+}
+
+#[test]
+fn undecodable_form_is_counted_and_removed_by_hidden_layer_sanitization() {
+    use crate::sanitize::{Hidden, remove_hidden, scan};
+
+    let mut doc = one_page(
+        b"/Bad Do",
+        "/XObject << /Bad 7 0 R >>",
+        vec![stream("/Type /XObject /Subtype /Form /BBox [0 0 300 300] /Filter /UnknownFilter", b"PRIVATE_UNDECODABLE_FORM")],
+    );
+    let counts = scan(&doc);
+    assert!(counts.iter().any(|(h, n)| *h == Hidden::HiddenLayers && *n > 0), "{counts:?}");
+    remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+
+    let bytes = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert!(!bytes.windows(b"PRIVATE_UNDECODABLE_FORM".len()).any(|w| w == b"PRIVATE_UNDECODABLE_FORM"));
+}
+
+#[test]
+fn form_chain_at_max_depth_is_counted_and_removed_by_hidden_layer_sanitization() {
+    use crate::sanitize::{Hidden, remove_hidden, scan};
+
+    const PRIVATE: &[u8] = b"PRIVATE_FORM_BEYOND_MAX_DEPTH";
+    // MAX_DEPTH is 12. The final Form is encountered at that depth and is removed
+    // conservatively without being entered. Verify must count that removal or sanitize
+    // can skip the HiddenLayers pass entirely.
+    let mut forms = Vec::new();
+    for depth in 0..=12 {
+        let content = if depth == 12 {
+            b"BT /F1 10 Tf 10 100 Td (PRIVATE_FORM_BEYOND_MAX_DEPTH) Tj ET".to_vec()
+        } else {
+            format!("/F{} Do", depth + 1).into_bytes()
+        };
+        forms.push(stream("/Type /XObject /Subtype /Form /BBox [0 0 300 300]", &content));
+    }
+    let xobjects = (0..=12).map(|depth| format!("/F{depth} {} 0 R", 7 + depth)).collect::<Vec<_>>().join(" ");
+    let mut doc = one_page(b"/F0 Do", &format!("/XObject << {xobjects} >>"), forms);
+    assert!(
+        write_full(&doc, &SaveOptions::default()).unwrap().windows(PRIVATE.len()).any(|w| w == PRIVATE),
+        "fixture lacked nested payload before sanitization"
+    );
+
+    let counts = scan(&doc);
+    assert!(counts.iter().any(|(hidden, count)| *hidden == Hidden::HiddenLayers && *count > 0), "depth-limited Form was not counted: {counts:?}");
+    let removed = remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+    assert!(
+        removed.iter().any(|(hidden, count)| *hidden == Hidden::HiddenLayers && *count > 0),
+        "depth-limited Form was not reported removed: {removed:?}"
+    );
+    let bytes = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert!(!bytes.windows(PRIVATE.len()).any(|w| w == PRIVATE), "depth-limited Form payload remains in full save");
+}
+
+#[test]
+fn hidden_ocmd_resolves_an_indirect_policy_name() {
+    use crate::sanitize::{Hidden, remove_hidden};
+
+    let mut doc = one_page(
+        b"/OC /M BDC BT /F1 10 Tf 10 100 Td (VISIBLE) Tj ET EMC",
+        "/Properties << /M 9 0 R >>",
+        vec![
+            b"<< /Type /OCG /Name (On) >>".to_vec(),
+            b"<< /Type /OCG /Name (Off) >>".to_vec(),
+            b"<< /Type /OCMD /OCGs [7 0 R 8 0 R] /P 12 0 R >>".to_vec(),
+        ],
+    );
+    doc.set(ObjRef::new(12, 0), Object::name("AnyOn"));
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |d| {
+        d.set(
+            b"OCProperties".to_vec(),
+            Object::Dict(Dict::from_iter([
+                (b"OCGs".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+                (b"D".to_vec(), Object::Dict(Dict::from_iter([(b"OFF".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(8, 0))]))]))),
+            ])),
+        );
+    })
+    .unwrap();
+
+    remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    assert!(pdfcraft_edit::text_lines(&saved, 0).unwrap().iter().any(|line| line.text.contains("VISIBLE")));
+}
+
+#[test]
+fn surviving_anyoff_and_not_content_keeps_its_off_group_state() {
+    use crate::sanitize::{Hidden, remove_hidden};
+
+    for use_not in [false, true] {
+        let mut doc = one_page(
+            b"/OC /M BDC BT /F1 10 Tf 10 100 Td (VISIBLE) Tj ET EMC",
+            "/Properties << /M 9 0 R >>",
+            vec![
+                b"<< /Type /OCG /Name (On) >>".to_vec(),
+                b"<< /Type /OCG /Name (Off) >>".to_vec(),
+                if use_not { b"<< /Type /OCMD /VE [/Not 8 0 R] >>".to_vec() } else { b"<< /Type /OCMD /OCGs [8 0 R] /P /AnyOff >>".to_vec() },
+            ],
+        );
+        let root = doc.root().unwrap();
+        doc.update_dict(root, |d| {
+            d.set(
+                b"OCProperties".to_vec(),
+                Object::Dict(Dict::from_iter([
+                    (b"OCGs".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+                    (b"D".to_vec(), Object::Dict(Dict::from_iter([(b"OFF".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(8, 0))]))]))),
+                ])),
+            );
+        })
+        .unwrap();
+
+        remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+        let root = doc.root().unwrap();
+        let catalog = doc.get(root);
+        let oc = catalog.as_dict().and_then(|d| d.get(b"OCProperties")).map(|o| doc.resolve(o));
+        let default = oc.as_deref().and_then(|o| o.as_dict()).and_then(|d| d.get(b"D")).map(|o| doc.resolve(o));
+        let off = default.as_deref().and_then(|o| o.as_dict()).and_then(|d| d.get(b"OFF")).map(|o| doc.resolve(o));
+        assert!(
+            off.as_deref().and_then(Object::as_array).is_some_and(|a| a.iter().any(|o| o.as_ref() == Some(ObjRef::new(8, 0)))),
+            "off group lost for /VE Not={use_not}"
+        );
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert!(pdfcraft_edit::text_lines(&saved, 0).unwrap().iter().any(|line| line.text.contains("VISIBLE")));
+    }
+}
+
+#[test]
+fn hidden_ocmd_policy_matches_the_default_configuration() {
+    use crate::sanitize::{Hidden, remove_hidden};
+
+    let cases = [
+        (None, false, None, false),
+        (Some("AnyOn"), false, None, false),
+        (Some("AllOn"), false, None, true),
+        (Some("AnyOff"), false, None, false),
+        (Some("AllOff"), false, None, true),
+        (Some("UnknownPolicy"), false, None, true),
+        (None, true, None, true),
+        (None, false, Some("and"), true),
+        (None, false, Some("and_single_not"), true),
+        (None, false, Some("and_single_off"), true),
+        (None, false, Some("or_single_on"), false),
+        (None, false, Some("or_single_off"), true),
+        (Some("AllOn"), false, Some("not_off"), false),
+        (None, false, Some("malformed_not"), true),
+        (None, false, Some("malformed_without_ocgs"), true),
+    ];
+    for (policy, malformed_policy, visibility, should_remove) in cases {
+        let mut doc = one_page(
+            b"/OC /M BDC BT /F1 10 Tf 10 100 Td (SECRET) Tj ET EMC",
+            "/Properties << /M 9 0 R >>",
+            vec![
+                b"<< /Type /OCG /Name (On) >>".to_vec(),
+                b"<< /Type /OCG /Name (Off) >>".to_vec(),
+                b"<< /Type /OCMD /OCGs [7 0 R 8 0 R] /P /AllOn >>".to_vec(),
+            ],
+        );
+        let mut membership = Dict::new();
+        membership.set(b"Type".to_vec(), Object::name("OCMD"));
+        if visibility != Some("malformed_without_ocgs") {
+            membership.set(b"OCGs".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))]));
+        }
+        if let Some(policy) = policy {
+            membership.set(b"P".to_vec(), Object::name(policy));
+        } else if malformed_policy {
+            membership.set(b"P".to_vec(), Object::Int(17));
+        }
+        match visibility {
+            Some("and") => membership
+                .set(b"VE".to_vec(), Object::Array(vec![Object::name("And"), Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+            Some("and_single_not") => membership.set(
+                b"VE".to_vec(),
+                Object::Array(vec![Object::name("Not"), Object::Array(vec![Object::name("And"), Object::Ref(ObjRef::new(7, 0))])]),
+            ),
+            Some("and_single_off") => membership.set(b"VE".to_vec(), Object::Array(vec![Object::name("And"), Object::Ref(ObjRef::new(8, 0))])),
+            Some("or_single_on") => membership.set(b"VE".to_vec(), Object::Array(vec![Object::name("Or"), Object::Ref(ObjRef::new(7, 0))])),
+            Some("or_single_off") => membership.set(b"VE".to_vec(), Object::Array(vec![Object::name("Or"), Object::Ref(ObjRef::new(8, 0))])),
+            Some("not_off") => membership.set(b"VE".to_vec(), Object::Array(vec![Object::name("Not"), Object::Ref(ObjRef::new(8, 0))])),
+            Some("malformed_not") => membership
+                .set(b"VE".to_vec(), Object::Array(vec![Object::name("Not"), Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+            Some("malformed_without_ocgs") => {
+                membership.set(b"VE".to_vec(), Object::Array(vec![Object::name("UnknownOperator"), Object::Ref(ObjRef::new(8, 0))]))
+            }
+            _ => {}
+        }
+        doc.set(ObjRef::new(9, 0), Object::Dict(membership));
+        let root = doc.root().unwrap();
+        doc.update_dict(root, |d| {
+            d.set(
+                b"OCProperties".to_vec(),
+                Object::Dict(Dict::from_iter([
+                    (b"OCGs".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+                    (
+                        b"D".to_vec(),
+                        Object::Dict(Dict::from_iter([
+                            (b"Order".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(7, 0)), Object::Ref(ObjRef::new(8, 0))])),
+                            (b"OFF".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(8, 0))])),
+                        ])),
+                    ),
+                ])),
+            );
+        })
+        .unwrap();
+
+        remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        let has_secret = pdfcraft_edit::text_lines(&saved, 0).unwrap().iter().any(|line| line.text.contains("SECRET"));
+        assert_eq!(has_secret, !should_remove, "policy {policy:?}, malformed={malformed_policy}, VE={visibility:?}");
+    }
+}
+
+#[test]
+fn redaction_clears_pixels_intersected_without_covering_their_centres() {
+    for (content, rect) in [
+        (&b"q 200 0 0 100 0 0 cm /Im Do Q"[..], [10.0, 10.0, 20.0, 90.0]),
+        (&b"q 0 100 -200 0 200 0 cm /Im Do Q"[..], [10.0, 5.0, 190.0, 10.0]),
+        (&b"q 200 40 30 100 0 0 cm /Im Do Q"[..], [10.0, 10.0, 20.0, 15.0]),
+    ] {
+        let mut doc = one_page(
+            content,
+            "/XObject << /Im 7 0 R >>",
+            vec![stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234])],
+        );
+        mark(&mut doc, 0, &[rect], "");
+        let report = apply(&mut doc, None).unwrap();
+        assert_eq!(report.images_cleared, 1);
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_eq!(named_image(&saved, 0, b"Im"), None);
+        assert_eq!(named_image(&saved, 0, b"PCRedacted1"), Some(vec![0, 234]));
+    }
+}
+
+#[test]
+fn intersected_image_samples_keep_mask_polarity_and_packed_neighbours() {
+    for (extra, original, cleared) in [
+        ("/ImageMask true /BitsPerComponent 1", 0b0000_0000, 0b1000_0000),
+        ("/ImageMask true /BitsPerComponent 1 /Decode [1 0]", 0b1100_0000, 0b0100_0000),
+        ("/ColorSpace /DeviceGray /BitsPerComponent 4", 0xAB, 0x0B),
+    ] {
+        let mut doc = one_page(
+            b"q 200 0 0 100 0 0 cm /Im Do Q",
+            "/XObject << /Im 7 0 R >>",
+            vec![stream(&format!("/Type /XObject /Subtype /Image /Width 2 /Height 1 {extra}"), &[original])],
+        );
+        mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+        assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1);
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_eq!(named_image(&saved, 0, b"PCRedacted1"), Some(vec![cleared]), "{extra}");
+    }
+}
+
+fn inherited_image_document(second_page: bool) -> Document {
+    let mut objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        format!(
+            "<< /Type /Pages /Kids [3 0 R {}] /Count {} /MediaBox [0 0 300 300] /Resources << /XObject << /Im 7 0 R >> >> >>",
+            if second_page { "8 0 R" } else { "" },
+            if second_page { 2 } else { 1 }
+        )
+        .into_bytes(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>".to_vec(),
+        stream("", b"q 200 0 0 100 0 0 cm /Im Do Q"),
+        FONT.replace("95 0 R", "6 0 R").into_bytes(),
+        widths(),
+        stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
+    ];
+    if second_page {
+        objects.push(b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>".to_vec());
+    }
+    pdf(objects)
+}
+
+#[test]
+fn intersected_image_cleanup_handles_inherited_resources_and_shared_pages() {
+    for second_page in [false, true] {
+        let mut doc = inherited_image_document(second_page);
+        mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+        assert_eq!(apply(&mut doc, Some(&[0])).unwrap().images_cleared, 1);
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_eq!(named_image(&saved, 0, b"Im"), None);
+        assert_eq!(named_image(&saved, 0, b"PCRedacted1"), Some(vec![0, 234]));
+        if second_page {
+            assert_eq!(named_image(&saved, 1, b"Im"), Some(vec![123, 234]));
+        } else {
+            assert_no_stream_payload(&saved, &[123, 234]);
+        }
+    }
+}
+
+#[test]
+fn an_image_drawn_again_outside_the_mark_keeps_its_original() {
+    let mut doc = one_page(
+        b"q 200 0 0 100 0 0 cm /Im Do Q q 50 0 0 50 220 220 cm /Im Do Q",
+        "/XObject << /Im 7 0 R >>",
+        vec![stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234])],
+    );
+    mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+    assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1);
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    assert_eq!(named_image(&saved, 0, b"Im"), Some(vec![123, 234]));
+    assert_eq!(named_image(&saved, 0, b"PCRedacted1"), Some(vec![0, 234]));
+}
+
+#[test]
+fn an_unused_form_alias_cannot_retain_the_original_image() {
+    let mut doc = one_page(
+        b"q 200 0 0 100 0 0 cm /Im Do Q",
+        "/XObject << /Im 7 0 R /Unused 8 0 R >>",
+        vec![
+            stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
+            stream("/Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources << /XObject << /Alias 7 0 R >> >>", b""),
+        ],
+    );
+    mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+    assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1);
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    assert_no_stream_payload(&saved, &[123, 234]);
+}
+
+#[test]
+fn form_owned_aliases_keep_live_originals_and_drop_unused_ones() {
+    for draw_original in [false, true] {
+        let mut doc = one_page(
+            b"q 200 0 0 100 0 0 cm /Im Do Q q 50 0 0 50 220 220 cm /Fm Do Q",
+            "/XObject << /Im 7 0 R /Fm 8 0 R >>",
+            vec![
+                stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
+                stream(
+                    "/Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources << /XObject << /Alias 7 0 R >> >>",
+                    if draw_original { b"/Alias Do" } else { b"" },
+                ),
+            ],
+        );
+        mark(&mut doc, 0, &[[10.0, 10.0, 20.0, 90.0]], "");
+        assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1);
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        let page = pdfcraft_model::pages(&saved).remove(0);
+        let res = saved.resolve(page.dict.get(b"Resources").unwrap());
+        let xo = saved.resolve(res.as_dict().unwrap().get(b"XObject").unwrap());
+        let form = saved.resolve(xo.as_dict().unwrap().get(b"Fm").unwrap());
+        let form_res = saved.resolve(form.as_dict().unwrap().get(b"Resources").unwrap());
+        let inner = saved.resolve(form_res.as_dict().unwrap().get(b"XObject").unwrap());
+        assert_eq!(inner.as_dict().unwrap().contains(b"Alias"), draw_original);
+        if !draw_original {
+            assert_no_stream_payload(&saved, &[123, 234]);
+        }
+    }
+}
+
+#[test]
+fn uncertain_inherited_resource_users_fail_closed_during_cleanup() {
+    for (extra, content) in [
+        ("/Font << /T3 << /Type /Font /Subtype /Type3 >> >>", &b"BT /T3 10 Tf (A) Tj ET"[..]),
+        ("/Pattern << /P << /PatternType 1 >> >>", &b"/Pattern cs /P scn 0 0 1 1 re f"[..]),
+        ("/ExtGState << /G << /SMask << /S /Alpha >> >> >>", &b"/G gs"[..]),
+    ] {
+        let mut doc = one_page(content, &format!("{extra} /XObject << /Im 7 0 R >>"), vec![stream("/Type /XObject /Subtype /Image", b"PRIVATE")]);
+        let page = pdfcraft_model::pages(&doc).remove(0);
+        let res = doc.resolve(page.dict.get(b"Resources").unwrap()).as_dict().cloned().unwrap();
+        let mut private = res.clone();
+        assert_eq!(crate::interp::prune_xobjects(&doc, &mut private, &[ObjRef::new(7, 0)], &[content.to_vec()]), Err(RedactError::Residue(1)));
+        assert_eq!(crate::interp::unlink_doomed(&mut doc, &[ObjRef::new(7, 0)]), Err(RedactError::Residue(1)));
+    }
+}
+
+#[test]
+fn cyclic_and_excessive_visibility_expressions_are_bounded_and_removed() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    for expression in [Object::Ref(ObjRef::new(10, 0)), Object::Array(vec![Object::name("And"); 4098])] {
+        let mut doc = one_page(
+            b"/OC /M BDC BT /F1 10 Tf 10 100 Td (SECRET) Tj ET EMC",
+            "/Properties << /M 9 0 R >>",
+            vec![b"<< /Type /OCG /Name (On) >>".to_vec()],
+        );
+        doc.set(ObjRef::new(9, 0), Object::Dict(Dict::from_iter([(b"Type".to_vec(), Object::name("OCMD")), (b"VE".to_vec(), expression)])));
+        doc.set(ObjRef::new(10, 0), Object::Array(vec![Object::name("Not"), Object::Ref(ObjRef::new(10, 0))]));
+        remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_no_stream_payload(&saved, b"SECRET");
+    }
+}
+
+#[test]
+fn hidden_ocmd_resolves_indirect_types_and_visibility_operators() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    for membership in ["<< /Type 12 0 R /OCGs [7 0 R] /P /AllOff >>", "<< /Type /OCMD /VE [13 0 R 7 0 R] >>"] {
+        let mut doc = one_page(
+            b"/OC /M BDC BT /F1 10 Tf 10 100 Td (SECRET) Tj ET EMC",
+            "/Properties << /M 9 0 R >>",
+            vec![b"<< /Type 14 0 R /Name (On) >>".to_vec(), b"null".to_vec(), membership.as_bytes().to_vec()],
+        );
+        doc.set(ObjRef::new(12, 0), Object::name("OCMD"));
+        doc.set(ObjRef::new(13, 0), Object::name("Not"));
+        doc.set(ObjRef::new(14, 0), Object::name("OCG"));
+        remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_no_stream_payload(&saved, b"SECRET");
+    }
+}
+
+#[test]
+fn hidden_ocmd_removal_preserves_later_graphics_state_and_text_advance() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    for content in [
+        &b"/OC /M BDC 1 0 0 1 100 0 cm 1 0 0 rg EMC BT /F1 10 Tf 10 100 Td (VISIBLE) Tj ET"[..],
+        &b"BT /F1 10 Tf 10 100 Td /OC /M BDC (SECRET) Tj EMC (VISIBLE) Tj ET"[..],
+    ] {
+        let mut doc = one_page(
+            content,
+            "/Properties << /M 9 0 R >>",
+            vec![b"<< /Type /OCG /Name (On) >>".to_vec(), b"null".to_vec(), b"<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>".to_vec()],
+        );
+        let before = pdfcraft_edit::text_lines(&doc, 0).unwrap();
+        let visible_before = before.iter().find(|line| line.text.contains("VISIBLE")).unwrap();
+        let expected_x = if content.starts_with(b"BT") { 40.0 } else { visible_before.rect[0] };
+        remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        let lines = pdfcraft_edit::text_lines(&saved, 0).unwrap();
+        let visible = lines.iter().find(|line| line.text.contains("VISIBLE")).unwrap();
+        assert!((visible.rect[0] - expected_x).abs() < 0.001, "{lines:?}");
+        assert_eq!(visible.color, visible_before.color);
+        assert_no_stream_payload(&saved, b"SECRET");
+    }
+}
+
+#[test]
+fn hidden_ocmd_painting_is_removed_while_clipping_state_remains() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    let mut doc = one_page(
+        b"/OC /M BDC 1 2 3 4 re f 10 20 30 40 re W f q 10 0 0 10 0 0 cm /Im Do Q EMC 0 0 100 100 re f",
+        "/Properties << /M 9 0 R >> /XObject << /Im 10 0 R >>",
+        vec![
+            b"<< /Type /OCG /Name (On) >>".to_vec(),
+            b"null".to_vec(),
+            b"<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>".to_vec(),
+            stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[123, 234]),
+        ],
+    );
+    remove_hidden(&mut doc, &[Hidden::HiddenLayers]).unwrap();
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    let ops = content(&saved, 0);
+    assert!(!ops.contains("1 2 3 4 re"));
+    assert!(ops.contains("10 20 30 40 re\nW\nn"), "{ops}");
+    assert!(!ops.contains("/Im Do"));
+    assert_no_stream_payload(&saved, &[123, 234]);
+}
+
+#[test]
+fn hidden_clipping_text_refuses_a_state_changing_rewrite() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    let mut doc = one_page(
+        b"/OC /M BDC BT /F1 10 Tf 7 Tr 10 100 Td (SECRET) Tj ET EMC",
+        "/Properties << /M 9 0 R >>",
+        vec![b"<< /Type /OCG /Name (On) >>".to_vec(), b"null".to_vec(), b"<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>".to_vec()],
+    );
+    assert_eq!(remove_hidden(&mut doc, &[Hidden::HiddenLayers]), Err(RedactError::Residue(1)));
+}
+
+#[test]
+fn hidden_zero_size_text_with_spacing_refuses_a_state_changing_rewrite() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    let mut doc = one_page(
+        b"BT /F1 0 Tf 5 Tc /OC /M BDC (SECRET) Tj EMC /F1 10 Tf (VISIBLE) Tj ET",
+        "/Properties << /M 9 0 R >>",
+        vec![b"<< /Type /OCG /Name (On) >>".to_vec(), b"null".to_vec(), b"<< /Type /OCMD /OCGs [7 0 R] /P /AllOff >>".to_vec()],
+    );
+    assert_eq!(remove_hidden(&mut doc, &[Hidden::HiddenLayers]), Err(RedactError::Residue(1)));
+}
+
 fn stream(dict: &str, data: &[u8]) -> Vec<u8> {
     let mut v = format!("<< {dict} /Length {} >>\nstream\n", data.len()).into_bytes();
     v.extend_from_slice(data);
