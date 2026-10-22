@@ -184,9 +184,61 @@ function Wait-Rendered {
     throw 'The document did not reach a rendered, unobstructed state within 40 seconds.'
 }
 
+function Wait-CaptureFrame {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][scriptblock]$ReadFrame,
+        [ValidateRange(1, 60000)][int]$TimeoutMilliseconds = 40000,
+        [ValidateRange(1, 1000)][int]$PollMilliseconds = 250
+    )
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $stableCount = 0
+    $stableSize = ''
+    $attempts = 0
+    $observed = 'no frame received'
+    do {
+        $frame = & $ReadFrame
+        $attempts++
+        $before = @($frame.Before)
+        $after = @($frame.After)
+        if ($before.Count -ne 2 -or $after.Count -ne 2 -or $before[0] -le 0 -or $before[1] -le 0 -or $after[0] -le 0 -or $after[1] -le 0) { throw 'Cannot measure valid native client dimensions.' }
+        $observed = 'native before {0}x{1}, after {2}x{3}, screenshot {4}x{5}' -f $before[0], $before[1], $after[0], $after[1], $frame.Shot.width, $frame.Shot.height
+        $size = '{0}x{1}' -f $after[0], $after[1]
+        if ($before[0] -eq $after[0] -and $before[1] -eq $after[1] -and [Math]::Abs($after[0] - $frame.Shot.width) -le 2 -and [Math]::Abs($after[1] - $frame.Shot.height) -le 2) {
+            $stableCount = $(if ($size -eq $stableSize) { $stableCount + 1 } else { 1 })
+            $stableSize = $size
+        } else {
+            $stableCount = 0
+            $stableSize = ''
+        }
+        if ($timer.ElapsedMilliseconds -ge $TimeoutMilliseconds) { break }
+        if ($stableCount -ge 2) {
+            $frame.Attempts = $attempts
+            return $frame
+        }
+        $remaining = $TimeoutMilliseconds - [int]$timer.ElapsedMilliseconds
+        if ($remaining -le 0) { break }
+        Start-Sleep -Milliseconds ([Math]::Min($PollMilliseconds, $remaining))
+    } while ($timer.ElapsedMilliseconds -lt $TimeoutMilliseconds)
+    throw "Native window and screenshot did not converge before the capture deadline ($observed); refusing an ambiguous capture."
+}
+
 function Capture-Current([string]$Name, [string]$Description) {
-    $state = Wait-Rendered
-    $shot = Invoke-Ui 'ui.screenshot'
+    # Raster readiness alone does not establish that WM_SIZE and the render surface
+    # have converged. Require two fresh matching frames before recording pixels.
+    $frame = Wait-CaptureFrame -ReadFrame {
+        $state = Wait-Rendered
+        $handle = $script:process.MainWindowHandle
+        if (-not [PdfStrikeCaptureWindow]::IsWindowVisible($handle) -or [PdfStrikeCaptureWindow]::GetForegroundWindow() -ne $handle) { throw 'The native window is not visible and in front; refusing a capture.' }
+        $before = [PdfStrikeCaptureWindow+RECT]::new()
+        if (-not [PdfStrikeCaptureWindow]::GetClientRect($handle, [ref]$before)) { throw 'Cannot measure the native client before its screenshot.' }
+        $shot = Invoke-Ui 'ui.screenshot'
+        $after = [PdfStrikeCaptureWindow+RECT]::new()
+        if (-not [PdfStrikeCaptureWindow]::GetClientRect($handle, [ref]$after)) { throw 'Cannot measure the native client after its screenshot.' }
+        return @{ Shot = $shot; State = $state; Before = @(($before.Right - $before.Left), ($before.Bottom - $before.Top)); After = @(($after.Right - $after.Left), ($after.Bottom - $after.Top)) }
+    }
+    $state = $frame.State
+    $shot = $frame.Shot
     $clientName = $Name + '-client.png'
     $clientPath = Join-Path $script:OutputDirectory $clientName
     [IO.File]::WriteAllBytes($clientPath, [Convert]::FromBase64String($shot.png_base64))
@@ -197,6 +249,7 @@ function Capture-Current([string]$Name, [string]$Description) {
         active = $state.active
         mode = $state.mode
         right_panel = $state.right_panel
+        geometry = [ordered]@{ fresh_frame_attempts = $frame.Attempts; native_client_before = $frame.Before; native_client_after = $frame.After }
         client = [ordered]@{ file = $clientName; width = $shot.width; height = $shot.height; pixels_per_point = $shot.pixels_per_point; sha256 = (Get-FileHash -LiteralPath $clientPath -Algorithm SHA256).Hash.ToLowerInvariant() }
         client_file = $clientName
         client_sha256 = (Get-FileHash -LiteralPath $clientPath -Algorithm SHA256).Hash.ToLowerInvariant()

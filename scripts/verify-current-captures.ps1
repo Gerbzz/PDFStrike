@@ -14,10 +14,17 @@ foreach ($tree in @(@('native_source_tree', 'native/pdfstrike'), @('fixtures_tre
     if ($LASTEXITCODE -ne 0 -or $manifest[$tree[0]] -ne $actual) { throw "Captured $($tree[1]) does not match this checkout." }
 }
 $helperRelative = 'scripts/capture-current-ui.ps1'
-# Windows Git checkouts can use CRLF. Check both exact UTF-8 line-ending variants
-# against the raw executed-file hash without requiring the capture commit to
-# remain reachable after a squash merge and deletion of its source branch.
-$helperText = [IO.File]::ReadAllText((Join-Path $RepositoryRoot $helperRelative)).Replace("`r`n", "`n")
+# The capture commit is already merged into main. Verify its immutable helper,
+# rather than requiring today's helper to equal the one used for historical PNGs.
+# The provenance workflow fetches full history; deleting a merged branch is safe.
+$captureTree = (& git -C $RepositoryRoot rev-parse ($manifest.source_commit + '^{tree}')).Trim()
+if ($LASTEXITCODE -ne 0 -or $captureTree -ne $manifest.source_tree) { throw 'Captured source tree differs from its recorded commit.' }
+& git -C $RepositoryRoot merge-base --is-ancestor $manifest.source_commit HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Captured source must remain in the published history.' }
+$helperLines = @(& git -C $RepositoryRoot show ($manifest.source_commit + ':' + $helperRelative))
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read the executed capture helper from its recorded source.' }
+$helperText = ($helperLines -join "`n") + "`n"
+# Windows Git checkouts can use CRLF; compare both exact UTF-8 variants.
 $helperHashes = @($helperText, $helperText.Replace("`n", "`r`n")) | ForEach-Object {
     [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($_))).ToLowerInvariant()
 }
