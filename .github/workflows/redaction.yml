@@ -7,6 +7,8 @@ on:
     paths:
       - '.github/workflows/redaction.yml'
       - 'scripts/capture-current-ui.ps1'
+      - 'scripts/test-capture-frame.ps1'
+      - 'scripts/test-capture-window.ps1'
       - 'native/pdfstrike/**'
       - 'apps/pdfstrike/**'
       - 'vendor/pdfcraft/**'
@@ -48,6 +50,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Capture window and frame controls
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: .
+        run: |
+          ./scripts/test-capture-frame.ps1
+          ./scripts/test-capture-window.ps1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

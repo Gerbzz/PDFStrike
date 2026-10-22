@@ -9,6 +9,7 @@ on:
       - 'docs/SCREENSHOT_PROVENANCE.md'
       - 'assets/screenshots/current/**'
       - 'scripts/verify-current-captures.ps1'
+      - 'scripts/capture-current-ui.ps1'
       - '.github/workflows/screenshot-provenance.yml'
   push:
     branches: [main]
@@ -18,6 +19,7 @@ on:
       - 'docs/SCREENSHOT_PROVENANCE.md'
       - 'assets/screenshots/current/**'
       - 'scripts/verify-current-captures.ps1'
+      - 'scripts/capture-current-ui.ps1'
       - '.github/workflows/screenshot-provenance.yml'
 
 permissions:

@@ -27,6 +27,8 @@ The run retained current UI artifact `12381360417` (471,284-byte ZIP, SHA-256 `2
 
 These captures establish the displayed synthetic workflows on the hosted Windows runner. They do not establish Room interactive acceptance, installer/package behavior, broad PDF compatibility, arbitrary Forms/annotation persistence or hostile-PDF isolation. No Room native executable or previously denied diagnostic was retried for this update. The historical images and their provenance remain below and are retained unchanged in the repository.
 
+The current-image verifier reads the executed helper from the recorded capture commit, which is already retained in main's merged history. Later capture-helper fixes therefore do not relabel these PNGs or require today's helper to equal the historical one. The verifier checks that recorded commit's tree and ancestor relationship, exact helper hash and all unchanged image/input/native-source hashes. Full Git history is required for this verification.
+
 ## Historical October 14 captures
 
 The three README images are screenshots from a live PDFStrike native Windows window at 1440 × 920. They were captured through the application's localhost `ui.screenshot` endpoint on 2026-10-14 UTC. No UI elements were composited into the images.
