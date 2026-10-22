@@ -37,9 +37,51 @@ Copy-Item -LiteralPath $Executable -Destination $stagedExe
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class PdfStrikeCaptureWindow {
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+    public sealed class WindowInfo {
+        public long Handle;
+        public int ProcessId;
+        public bool Visible, HasOwner;
+        public string ClassName = "", Title = "";
+        public int Width, Height;
+    }
+    private delegate bool EnumWindowsProc(IntPtr handle, IntPtr data);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr data);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr handle, uint command);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)] private static extern int GetClassNameW(IntPtr handle, StringBuilder name, int capacity);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)] private static extern int GetWindowTextW(IntPtr handle, StringBuilder title, int capacity);
+    [DllImport("user32.dll", ExactSpelling = true)] public static extern bool PostMessageW(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
+    public static WindowInfo[] OwnWindows(int processId) {
+        var windows = new List<WindowInfo>();
+        EnumWindowsProc callback = (handle, data) => {
+            uint ownerProcess;
+            GetWindowThreadProcessId(handle, out ownerProcess);
+            // Do not read titles, classes or geometry belonging to another process.
+            if (ownerProcess != (uint)processId) return true;
+            var name = new StringBuilder(256);
+            var title = new StringBuilder(512);
+            GetClassNameW(handle, name, name.Capacity);
+            GetWindowTextW(handle, title, title.Capacity);
+            RECT client;
+            bool measured = GetClientRect(handle, out client);
+            windows.Add(new WindowInfo {
+                Handle = handle.ToInt64(), ProcessId = processId,
+                Visible = IsWindowVisible(handle), HasOwner = GetWindow(handle, 4) != IntPtr.Zero,
+                ClassName = name.ToString(), Title = title.ToString(),
+                Width = measured ? client.Right - client.Left : 0,
+                Height = measured ? client.Bottom - client.Top : 0
+            });
+            return true;
+        };
+        if (!EnumWindows(callback, IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        GC.KeepAlive(callback);
+        return windows.ToArray();
+    }
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -58,6 +100,7 @@ if ($workArea.Width -lt 840 -or $workArea.Height -lt 560) { throw 'Hosted deskto
 $utf8 = [Text.UTF8Encoding]::new($false)
 $process = $null
 $endpoint = $null
+$nativeHandle = [IntPtr]::Zero
 $launches = [Collections.Generic.List[object]]::new()
 $captures = [Collections.Generic.List[object]]::new()
 $manifest = [ordered]@{
@@ -117,19 +160,52 @@ function Invoke-Ui([string]$Method, [hashtable]$Parameters = @{}) {
     } finally { $tcp.Dispose() }
 }
 
+function Select-CaptureWindow {
+    param([AllowEmptyCollection()][object[]]$Windows, [int]$ExpectedProcessId)
+    $eligible = @($Windows | Where-Object {
+        if ($_.ProcessId -ne $ExpectedProcessId) { return $false }
+        $title = [string]$_.Title
+        $_.Visible -and -not $_.HasOwner -and
+        $_.Handle -ne 0 -and $_.Width -gt 0 -and $_.Height -gt 0 -and
+        $_.ClassName -ceq 'Window Class' -and
+        ($title -ceq 'PDFStrike' -or ($title.Length -gt 12 -and $title.EndsWith(' - PDFStrike', [StringComparison]::Ordinal)))
+    })
+    if ($eligible.Count -gt 1) { throw 'More than one verified PDFStrike GUI window belongs to the launched process; refusing ambiguous selection.' }
+    if ($eligible.Count -eq 1) { return $eligible[0] }
+    return $null
+}
+
+function Get-CaptureWindow {
+    if (-not $script:process -or $script:process.HasExited -or $script:nativeHandle -eq [IntPtr]::Zero) { throw 'The retained PDFStrike GUI window is unavailable.' }
+    $windows = @([PdfStrikeCaptureWindow]::OwnWindows($script:process.Id))
+    $selected = Select-CaptureWindow -Windows $windows -ExpectedProcessId $script:process.Id
+    if (-not $selected -or $selected.Handle -ne $script:nativeHandle.ToInt64()) { throw 'The retained PDFStrike GUI window identity changed; refusing capture.' }
+    return $selected
+}
+
 function Stop-Native {
     $script:endpoint = $null
     if ($script:process) {
-        if (-not $script:process.HasExited) {
-            $null = $script:process.CloseMainWindow()
-            if (-not $script:process.WaitForExit(5000)) {
-                # Only this script's newly created process is terminated, never an existing app.
-                $script:process.Kill()
-                if (-not $script:process.WaitForExit(5000)) { throw 'The capture process did not terminate within five seconds.' }
+        try {
+            if (-not $script:process.HasExited) {
+                try {
+                    if ($script:nativeHandle -ne [IntPtr]::Zero) {
+                        $null = Get-CaptureWindow
+                        $null = [PdfStrikeCaptureWindow]::PostMessageW($script:nativeHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+                    }
+                } finally {
+                    if (-not $script:process.WaitForExit(5000)) {
+                        # Only this script's newly created process is terminated, never an existing app.
+                        $script:process.Kill()
+                        if (-not $script:process.WaitForExit(5000)) { throw 'The capture process did not terminate within five seconds.' }
+                    }
+                }
             }
+        } finally {
+            $script:process.Dispose()
+            $script:process = $null
+            $script:nativeHandle = [IntPtr]::Zero
         }
-        $script:process.Dispose()
-        $script:process = $null
     }
 }
 
@@ -146,24 +222,32 @@ function Start-Native([string]$Fixture, [string]$Panel) {
         $info.ArgumentList.Add($argument)
     }
     $script:process = [Diagnostics.Process]::Start($info)
+    $launch = [ordered]@{ fixture = [IO.Path]::GetFileName($Fixture); panel = $Panel; process_id = $script:process.Id; selected_window = $null; window_candidates = @() }
+    $script:launches.Add($launch)
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
     do {
         if ($script:process.HasExited) { throw "Native app exited before its window was ready (exit $($script:process.ExitCode))." }
         $script:process.Refresh()
-        if ((Test-Path -LiteralPath $control) -and $script:process.MainWindowHandle -ne [IntPtr]::Zero) { break }
+        $windows = @([PdfStrikeCaptureWindow]::OwnWindows($script:process.Id))
+        $launch.window_candidates = @($windows | ForEach-Object { [ordered]@{ handle = $_.Handle; process_id = $_.ProcessId; class = $_.ClassName; title = $_.Title; visible = $_.Visible; owned = $_.HasOwner; client = @($_.Width, $_.Height) } })
+        $selected = Select-CaptureWindow -Windows $windows -ExpectedProcessId $script:process.Id
+        if ((Test-Path -LiteralPath $control) -and $selected) { break }
         Start-Sleep -Milliseconds 200
     } while ([DateTime]::UtcNow -lt $deadline)
-    if (-not (Test-Path -LiteralPath $control) -or $script:process.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Native window/control startup exceeded 60 seconds.' }
+    if (-not (Test-Path -LiteralPath $control) -or -not $selected) { throw 'Verified native GUI window/control startup exceeded 60 seconds.' }
     $script:endpoint = Get-Content -LiteralPath $control -Raw | ConvertFrom-Json -AsHashtable
     if ([int]$script:endpoint.pid -ne $script:process.Id) { throw 'Native control endpoint belongs to another process.' }
-    $handle = $script:process.MainWindowHandle
+    $script:nativeHandle = [IntPtr]$selected.Handle
+    $selected = Get-CaptureWindow
+    $handle = $script:nativeHandle
     $null = [PdfStrikeCaptureWindow]::ShowWindow($handle, 9)
     $width = [Math]::Min(1460, $script:workArea.Width)
     $height = [Math]::Min(960, $script:workArea.Height)
     # TOPMOST applies only to this hosted capture window and ends with its process.
     if (-not [PdfStrikeCaptureWindow]::SetWindowPos($handle, [IntPtr](-1), $script:workArea.X, $script:workArea.Y, $width, $height, 0x0040)) { throw 'Cannot position the native capture window.' }
     $null = [PdfStrikeCaptureWindow]::SetForegroundWindow($handle)
-    $script:launches.Add([ordered]@{ fixture = [IO.Path]::GetFileName($Fixture); panel = $Panel; process_id = $script:process.Id; requested_window_size = @($width, $height) })
+    $launch.requested_window_size = @($width, $height)
+    $launch.selected_window = [ordered]@{ handle = $selected.Handle; process_id = $selected.ProcessId; class = $selected.ClassName; title = $selected.Title }
     $null = Invoke-Ui 'ui.set' @{ key = 'layout'; value = 'single' }
     $null = Invoke-Ui 'ui.set' @{ key = 'page'; value = '1' }
     $null = Invoke-Ui 'ui.set' @{ key = 'zoom'; value = '80' }
@@ -228,13 +312,15 @@ function Capture-Current([string]$Name, [string]$Description) {
     # have converged. Require two fresh matching frames before recording pixels.
     $frame = Wait-CaptureFrame -ReadFrame {
         $state = Wait-Rendered
-        $handle = $script:process.MainWindowHandle
+        $null = Get-CaptureWindow
+        $handle = $script:nativeHandle
         if (-not [PdfStrikeCaptureWindow]::IsWindowVisible($handle) -or [PdfStrikeCaptureWindow]::GetForegroundWindow() -ne $handle) { throw 'The native window is not visible and in front; refusing a capture.' }
         $before = [PdfStrikeCaptureWindow+RECT]::new()
         if (-not [PdfStrikeCaptureWindow]::GetClientRect($handle, [ref]$before)) { throw 'Cannot measure the native client before its screenshot.' }
         $shot = Invoke-Ui 'ui.screenshot'
         $after = [PdfStrikeCaptureWindow+RECT]::new()
         if (-not [PdfStrikeCaptureWindow]::GetClientRect($handle, [ref]$after)) { throw 'Cannot measure the native client after its screenshot.' }
+        $null = Get-CaptureWindow
         return @{ Shot = $shot; State = $state; Before = @(($before.Right - $before.Left), ($before.Bottom - $before.Top)); After = @(($after.Right - $after.Left), ($after.Bottom - $after.Top)) }
     }
     $state = $frame.State
@@ -255,7 +341,8 @@ function Capture-Current([string]$Name, [string]$Description) {
         client_sha256 = (Get-FileHash -LiteralPath $clientPath -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     $script:captures.Add($capture)
-    $handle = $script:process.MainWindowHandle
+    $window = Get-CaptureWindow
+    $handle = $script:nativeHandle
     if (-not [PdfStrikeCaptureWindow]::IsWindowVisible($handle) -or [PdfStrikeCaptureWindow]::GetForegroundWindow() -ne $handle) {
         throw 'The native window is not visible and in front; client PNG retained, native titlebar capture refused.'
     }
@@ -278,10 +365,11 @@ function Capture-Current([string]$Name, [string]$Description) {
     $windowPath = Join-Path $script:OutputDirectory $windowName
     try {
         $graphics.CopyFromScreen($rectangle.Location, [Drawing.Point]::Empty, $rectangle.Size, [Drawing.CopyPixelOperation]::SourceCopy)
+        $null = Get-CaptureWindow
         if ([PdfStrikeCaptureWindow]::GetForegroundWindow() -ne $handle) { throw 'Foreground window changed during capture; refusing an ambiguous desktop image.' }
         $bitmap.Save($windowPath, [Drawing.Imaging.ImageFormat]::Png)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
-    $capture.window = [ordered]@{ file = $windowName; width = $rectangle.Width; height = $rectangle.Height; bounds = @($rectangle.Left, $rectangle.Top, $rectangle.Right, $rectangle.Bottom); bounds_method = $boundsMethod; title = $script:process.MainWindowTitle; dpi = [PdfStrikeCaptureWindow]::GetDpiForWindow($handle); sha256 = (Get-FileHash -LiteralPath $windowPath -Algorithm SHA256).Hash.ToLowerInvariant() }
+    $capture.window = [ordered]@{ file = $windowName; width = $rectangle.Width; height = $rectangle.Height; bounds = @($rectangle.Left, $rectangle.Top, $rectangle.Right, $rectangle.Bottom); bounds_method = $boundsMethod; handle = $window.Handle; process_id = $window.ProcessId; class = $window.ClassName; title = $window.Title; dpi = [PdfStrikeCaptureWindow]::GetDpiForWindow($handle); sha256 = (Get-FileHash -LiteralPath $windowPath -Algorithm SHA256).Hash.ToLowerInvariant() }
     $capture.window_file = $windowName
     $capture.window_sha256 = $capture.window.sha256
     Write-Output ("Captured {0}: native window {1}x{2}, client {3}x{4}" -f $Name, $rectangle.Width, $rectangle.Height, $shot.width, $shot.height)
@@ -331,6 +419,11 @@ try {
     $log = Join-Path $stage 'PDFStrikeData/logs/pdfstrike.log'
     $manifest.renderer = if (Test-Path -LiteralPath $log) { @(Get-Content -LiteralPath $log | Where-Object { $_ -match 'renderer:|drawing on ' } | Select-Object -Last 4) } else { @() }
     $manifest.finished_utc = [DateTime]::UtcNow.ToString('o')
-    Stop-Native
-    [IO.File]::WriteAllText((Join-Path $OutputDirectory 'capture-manifest.json'), ($manifest | ConvertTo-Json -Depth 20), $utf8)
+    try { Stop-Native } catch {
+        $manifest.status = 'failed'
+        $manifest.cleanup_failure = $_.Exception.Message
+        throw
+    } finally {
+        [IO.File]::WriteAllText((Join-Path $OutputDirectory 'capture-manifest.json'), ($manifest | ConvertTo-Json -Depth 20), $utf8)
+    }
 }
