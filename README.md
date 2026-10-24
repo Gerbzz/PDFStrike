@@ -15,6 +15,12 @@
 
 PDFStrike pairs an editable `.pdfstrike` project with a new PDF export. Reorder or rotate pages, add a note or highlight, fill supported text and checkbox fields, then revise with undo and redo.
 
+## Rust direction and migration status
+
+- **Target:** Adapt and extend the existing Rust PdfCraft foundation into PDFStrike, not rewrite an already-Rust PDF engine.
+- **Current implementation:** Published `main` has a Rust CLI/core workspace in [`apps/pdfstrike`](apps/pdfstrike/) with [`vendor/pdfcraft`](vendor/pdfcraft/), and a separate Rust native editor/project workspace in [`native/pdfstrike`](native/pdfstrike/). Their reviewed project subset interoperates, but the cores remain different source revisions.
+- **Remaining migration:** Consolidate compatible core behavior without removing needed CLI or project support, and verify document fidelity and redaction output. Broader native interaction, accessibility, packaging, and release acceptance remain unfinished; separate workspaces alone do not imply competing desktop applications.
+
 **Screenshot scope:** These native Windows screenshots were captured on October 21, 2026 from source `20deb626`, with the merged geometric app icon. The opened fixtures are self-authored test data. [Capture provenance](docs/SCREENSHOT_PROVENANCE.md) records the exact source, executable, hosted checks and image hashes.
 
 ![PDFStrike showing the four-page synthetic project and its current geometric titlebar icon](assets/screenshots/current/pdfstrike-project-overview-current-window.png)
